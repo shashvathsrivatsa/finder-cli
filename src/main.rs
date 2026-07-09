@@ -221,8 +221,12 @@ impl GroupedEntries {
         let mut selected_item_index: usize = 0;
         let mut running = 0usize;
 
-        for (label, idxs) in &self.groups {
-            // Group header (dim, small)
+        for (group_idx, (label, idxs)) in self.groups.iter().enumerate() {
+            // Blank spacer before every group except the first
+            if group_idx > 0 {
+                items.push(ListItem::new(Line::from("")));
+            }
+            // Group header
             items.push(
                 ListItem::new(Line::from(vec![Span::styled(
                     label.clone(),
@@ -261,11 +265,12 @@ impl GroupedEntries {
         self.row_to_entry.get(row).map(|&i| &self.entries[i])
     }
 
-    // Given a flat row index, what is the list-widget item index (skipping headers)?
+    // Given a flat row index, what is the list-widget item index (accounting for headers + spacers)?
     fn list_index_for_row(&self, row: usize) -> usize {
         let mut list_idx = 0usize;
         let mut remaining = row;
-        for (_, idxs) in &self.groups {
+        for (gi, (_, idxs)) in self.groups.iter().enumerate() {
+            if gi > 0 { list_idx += 1; } // blank spacer before non-first groups
             list_idx += 1; // header
             if remaining < idxs.len() {
                 return list_idx + remaining;
@@ -341,16 +346,24 @@ impl App {
     }
 
     fn maybe_push_child_column(&mut self) {
-        // Keep columns to the right of active_col pruned first
-        self.columns.truncate(self.active_col + 1);
+        let selected_dir = self.columns[self.active_col]
+            .selected_entry()
+            .filter(|e| e.is_dir)
+            .map(|e| e.path.clone());
 
-        let Some(entry) = self.columns[self.active_col].selected_entry() else {
-            return;
-        };
-        if entry.is_dir {
-            let child_path = entry.path.clone();
-            let child_col = Column::new(child_path);
-            self.columns.push(child_col);
+        match selected_dir {
+            None => {
+                // Not a dir — drop any stale preview columns
+                self.columns.truncate(self.active_col + 1);
+            }
+            Some(path) => {
+                // If the immediate next column already shows this path, keep everything to the right
+                if self.columns.get(self.active_col + 1).is_some_and(|c| c.path == path) {
+                    return;
+                }
+                self.columns.truncate(self.active_col + 1);
+                self.columns.push(Column::new(path));
+            }
         }
     }
 
@@ -394,6 +407,21 @@ impl App {
     fn move_left(&mut self) {
         if self.active_col > 0 {
             self.active_col -= 1;
+        } else {
+            // Go up to parent directory
+            let current_path = self.columns[0].path.clone();
+            if let Some(parent) = current_path.parent() {
+                let mut parent_col = Column::new(parent.to_path_buf());
+                // Pre-select the child we came from
+                if let Some(row) = parent_col.grouped.row_to_entry.iter().position(|&i| {
+                    parent_col.grouped.entries[i].path == current_path
+                }) {
+                    parent_col.selected_row = row;
+                    parent_col.sync_list_state();
+                }
+                self.columns.insert(0, parent_col);
+                // active_col stays 0, now pointing at the new parent column
+            }
         }
     }
 }
@@ -489,8 +517,12 @@ fn main() -> io::Result<()> {
                     KeyCode::Char('q') | KeyCode::Esc => break,
                     KeyCode::Up | KeyCode::Char('k') => app.move_up(),
                     KeyCode::Down | KeyCode::Char('j') => app.move_down(),
-                    KeyCode::Right | KeyCode::Char('l') => app.move_right(),
-                    KeyCode::Left | KeyCode::Char('h') => app.move_left(),
+                    KeyCode::Right | KeyCode::Char('l') | KeyCode::Char('=') => app.move_right(),
+                    KeyCode::Left | KeyCode::Char('h') | KeyCode::Char('-') => app.move_left(),
+                    KeyCode::Char('n') => {
+                        app.columns.drain(0..app.active_col);
+                        app.active_col = 0;
+                    }
                     _ => {}
                 }
             }
