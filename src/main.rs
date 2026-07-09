@@ -1,6 +1,8 @@
 use std::path::{Path, PathBuf};
 use std::{fs, io};
 
+use std::time::Duration;
+
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind},
     execute,
@@ -12,7 +14,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, List, ListItem, ListState, Paragraph},
+    widgets::{Block, List, ListItem, ListState},
 };
 
 // ── Entry ────────────────────────────────────────────────────────────────────
@@ -22,6 +24,95 @@ struct Entry {
     name: String,
     path: PathBuf,
     is_dir: bool,
+}
+
+fn icon_for_entry(entry: &Entry) -> (&'static str, Color) {
+    // All icons use explicit \u{XXXX} Nerd Font (v2) codepoints
+    const FOLDER:   &str = "\u{F07B}"; // fa-folder
+    const FILE:     &str = "\u{F15B}"; // fa-file
+    const RUST:     &str = "\u{E7A8}"; // dev-rust
+    const JS:       &str = "\u{E74E}"; // dev-javascript
+    const TS:       &str = "\u{E628}"; // seti-typescript
+    const JSON:     &str = "\u{E60B}"; // seti-json
+    const HTML:     &str = "\u{E736}"; // dev-html5
+    const CSS:      &str = "\u{E749}"; // dev-css3
+    const SCSS:     &str = "\u{E603}"; // dev-sass
+    const PYTHON:   &str = "\u{E606}"; // seti-python
+    const GO:       &str = "\u{E627}"; // seti-go
+    const C:        &str = "\u{E61E}"; // custom-c
+    const CPP:      &str = "\u{E61D}"; // custom-cpp
+    const JAVA:     &str = "\u{E738}"; // dev-java
+    const RUBY:     &str = "\u{E21E}"; // dev-ruby
+    const SHELL:    &str = "\u{F489}"; // nf-fa-terminal
+    const MARKDOWN: &str = "\u{E609}"; // seti-markdown
+    const TOML:     &str = "\u{E6B2}"; // seti-config
+    const YAML:     &str = "\u{E60A}"; // seti-yml
+    const SQL:      &str = "\u{F1C0}"; // fa-database
+    const IMAGE:    &str = "\u{F1C5}"; // fa-file-image-o
+    const VIDEO:    &str = "\u{F03D}"; // fa-film
+    const AUDIO:    &str = "\u{F001}"; // fa-music
+    const PDF:      &str = "\u{F1C1}"; // fa-file-pdf-o
+    const ARCHIVE:  &str = "\u{F1C6}"; // fa-file-archive-o
+    const LOCK:     &str = "\u{F023}"; // fa-lock
+    const COG:      &str = "\u{F013}"; // fa-cog
+    const GIT:      &str = "\u{E702}"; // dev-git
+    const DOCKER:   &str = "\u{E7B0}"; // dev-docker
+    const NODE:     &str = "\u{E718}"; // dev-nodejs_small
+    const TEXT:     &str = "\u{F0F6}"; // fa-file-text-o
+    const LEGAL:    &str = "\u{F0E3}"; // fa-gavel
+
+    if entry.is_dir {
+        return (FOLDER, Color::Rgb(97, 175, 239));
+    }
+
+    match entry.name.to_lowercase().as_str() {
+        "cargo.toml"                                  => return (RUST,   Color::Rgb(222, 165, 132)),
+        "cargo.lock"                                  => return (LOCK,   Color::Rgb(183, 183, 183)),
+        "package.json" | "package-lock.json"          => return (NODE,   Color::Rgb(203, 120,  50)),
+        ".gitignore" | ".gitmodules" | ".gitattributes" => return (GIT,  Color::Rgb(241,  80,  47)),
+        "dockerfile" | "docker-compose.yml" | "docker-compose.yaml" => return (DOCKER, Color::Rgb(1, 135, 201)),
+        "makefile" | "gnumakefile"                    => return (COG,    Color::Rgb(111, 193,  44)),
+        "license" | "licence"                         => return (LEGAL,  Color::Rgb(240, 214,  83)),
+        _ => {}
+    }
+
+    let ext = entry.path.extension().and_then(|s| s.to_str()).unwrap_or("");
+    match ext {
+        "rs"                              => (RUST,     Color::Rgb(222, 165, 132)),
+        "js" | "mjs" | "cjs"             => (JS,       Color::Rgb(240, 214,  83)),
+        "ts" | "mts" | "cts"             => (TS,       Color::Rgb( 49, 120, 198)),
+        "jsx"                             => (JS,       Color::Rgb( 97, 218, 251)),
+        "tsx"                             => (TS,       Color::Rgb( 49, 120, 198)),
+        "json"                            => (JSON,     Color::Rgb(240, 214,  83)),
+        "html" | "htm"                    => (HTML,     Color::Rgb(228,  79,  38)),
+        "css"                             => (CSS,      Color::Rgb( 38, 143, 222)),
+        "scss" | "sass"                   => (SCSS,     Color::Rgb(204, 102, 153)),
+        "py" | "pyi"                      => (PYTHON,   Color::Rgb( 55, 118, 171)),
+        "go"                              => (GO,       Color::Rgb(  1, 173, 216)),
+        "c" | "h"                         => (C,        Color::Rgb( 85, 170, 255)),
+        "cpp" | "cc" | "cxx" | "hpp"     => (CPP,      Color::Rgb(243,  75, 125)),
+        "java"                            => (JAVA,     Color::Rgb(176, 114,  25)),
+        "rb"                              => (RUBY,     Color::Rgb(204,  52,  45)),
+        "sh" | "bash" | "zsh" | "fish"   => (SHELL,    Color::Rgb(121, 182, 122)),
+        "md" | "mdx"                      => (MARKDOWN, Color::Rgb( 66, 165, 245)),
+        "toml"                            => (TOML,     Color::Rgb(156, 175, 183)),
+        "yaml" | "yml"                    => (YAML,     Color::Rgb(204, 204, 204)),
+        "sql"                             => (SQL,      Color::Rgb(255, 160, 122)),
+        "env"                             => (COG,      Color::Rgb(240, 214,  83)),
+        "txt"                             => (TEXT,     Color::Rgb(187, 187, 187)),
+        "png" | "jpg" | "jpeg" | "gif"
+        | "webp" | "bmp" | "tiff" | "ico"
+        | "svg"                           => (IMAGE,    Color::Rgb(167, 215,  97)),
+        "mp4" | "mov" | "avi" | "mkv"
+        | "webm"                          => (VIDEO,    Color::Rgb(253, 199,   0)),
+        "mp3" | "wav" | "flac" | "aac"
+        | "ogg"                           => (AUDIO,    Color::Rgb(  0, 188, 212)),
+        "pdf"                             => (PDF,      Color::Rgb(236,  56,  50)),
+        "zip" | "tar" | "gz" | "bz2"
+        | "xz" | "7z"                     => (ARCHIVE,  Color::Rgb(240, 214,  83)),
+        "lock"                            => (LOCK,     Color::Rgb(183, 183, 183)),
+        _                                 => (FILE,     Color::Rgb(180, 180, 180)),
+    }
 }
 
 fn group_label(ext: &str) -> &'static str {
@@ -142,16 +233,16 @@ impl GroupedEntries {
 
             for &ei in idxs {
                 let e = &self.entries[ei];
-                let icon = if e.is_dir { " " } else { " " };
-                let has_children = e.is_dir;
-
-                let mut spans = vec![Span::raw(format!("{}{}", icon, e.name))];
-                if has_children {
-                    spans.push(Span::styled(
-                        "  ›",
-                        Style::default().fg(Color::DarkGray),
-                    ));
-                }
+                let (icon, icon_color) = icon_for_entry(e);
+                let label = if e.is_dir {
+                    format!("{}/", e.name)
+                } else {
+                    e.name.clone()
+                };
+                let spans = vec![
+                    Span::styled(format!("{} ", icon), Style::default().fg(icon_color)),
+                    Span::raw(label),
+                ];
 
                 if selected_entry_path.is_some_and(|p| p == e.path) {
                     selected_item_index = items.len();
@@ -263,6 +354,24 @@ impl App {
         }
     }
 
+    fn refresh(&mut self) {
+        for col in &mut self.columns {
+            let new_entries = read_dir_entries(&col.path);
+            let new_grouped = GroupedEntries::build(new_entries);
+
+            let old_name = col.grouped.entry_at_row(col.selected_row).map(|e| e.name.clone());
+            col.grouped = new_grouped;
+
+            col.selected_row = old_name
+                .and_then(|name| {
+                    col.grouped.row_to_entry.iter().position(|&i| col.grouped.entries[i].name == name)
+                })
+                .unwrap_or_else(|| col.selected_row.min(col.grouped.row_count.saturating_sub(1)));
+
+            col.sync_list_state();
+        }
+    }
+
     fn move_up(&mut self) {
         self.columns[self.active_col].move_up();
         self.maybe_push_child_column();
@@ -287,18 +396,6 @@ impl App {
             self.active_col -= 1;
         }
     }
-
-    fn breadcrumb(&self) -> String {
-        let mut parts: Vec<String> = Vec::new();
-        for col in &self.columns[..=self.active_col] {
-            if let Some(name) = col.path.file_name() {
-                parts.push(name.to_string_lossy().into_owned());
-            } else {
-                parts.push("/".to_string());
-            }
-        }
-        parts.join("  ›  ")
-    }
 }
 
 // ── Rendering ─────────────────────────────────────────────────────────────────
@@ -306,36 +403,19 @@ impl App {
 fn render(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
 
-    // Split: columns area on top, breadcrumb on bottom
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(0), Constraint::Length(1)])
-        .split(area);
+    let col_area = area;
 
-    let col_area = chunks[0];
-    let status_area = chunks[1];
-
-    // Render breadcrumb
-    let crumb = Paragraph::new(Line::from(vec![
-        Span::styled(" ", Style::default()),
-        Span::styled(app.breadcrumb(), Style::default().fg(Color::White)),
-    ]))
-    .style(Style::default().bg(Color::Rgb(30, 30, 30)));
-    frame.render_widget(crumb, status_area);
-
-    // Determine how many columns can fit (min 18 chars each)
     let num_cols = app.columns.len();
-    // If we have many columns, only show last N that fit
-    let visible_cols = (col_area.width / 20).max(1) as usize;
-    let start_col = if num_cols > visible_cols {
-        num_cols - visible_cols
-    } else {
-        0
-    };
+    const COL_WIDTH: u16 = 32;
+    let visible_cols = ((col_area.width / COL_WIDTH) as usize).max(1).min(num_cols);
+    // Follow active_col: show it with one preview column to its right when possible
+    let preferred_start = app.active_col.saturating_sub(visible_cols.saturating_sub(2));
+    let start_col = preferred_start.min(num_cols.saturating_sub(visible_cols));
 
-    let visible_count = num_cols - start_col;
-    let constraints: Vec<Constraint> =
-        (0..visible_count).map(|_| Constraint::Ratio(1, visible_count as u32)).collect();
+    let visible_count = (num_cols - start_col).min(visible_cols);
+    let mut constraints: Vec<Constraint> =
+        (0..visible_count).map(|_| Constraint::Length(COL_WIDTH)).collect();
+    constraints.push(Constraint::Min(0)); // fill remaining space
 
     let col_chunks = Layout::default()
         .direction(Direction::Horizontal)
@@ -345,12 +425,6 @@ fn render(frame: &mut Frame, app: &mut App) {
     for (vi, ci) in (start_col..num_cols).enumerate() {
         let col = &mut app.columns[ci];
         let is_active = ci == app.active_col;
-
-        let border_style = if is_active {
-            Style::default().fg(Color::White)
-        } else {
-            Style::default().fg(Color::Rgb(60, 60, 60))
-        };
 
         let folder_name = col
             .path
@@ -363,8 +437,8 @@ fn render(frame: &mut Frame, app: &mut App) {
                 format!(" {} ", folder_name),
                 Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
             ))
-            .border_style(border_style)
-            .style(Style::default().bg(Color::Rgb(20, 20, 20)));
+            .border_style(Style::default().fg(Color::Rgb(60, 60, 60)))
+            .style(Style::default().bg(Color::Black));
 
         let inner = block.inner(col_chunks[vi]);
         frame.render_widget(block, col_chunks[vi]);
@@ -374,9 +448,9 @@ fn render(frame: &mut Frame, app: &mut App) {
         let (items, _) = col.grouped.list_items(selected_path.as_deref());
 
         let highlight_style = if is_active {
-            Style::default().bg(Color::Rgb(0, 92, 197)).fg(Color::White).add_modifier(Modifier::BOLD)
+            Style::default().bg(Color::Rgb(0, 92, 197)).add_modifier(Modifier::BOLD)
         } else {
-            Style::default().bg(Color::Rgb(60, 60, 60)).fg(Color::White)
+            Style::default().bg(Color::Rgb(60, 60, 60))
         };
 
         let list = List::new(items)
@@ -406,18 +480,22 @@ fn main() -> io::Result<()> {
     loop {
         terminal.draw(|f| render(f, &mut app))?;
 
-        if let Event::Key(key) = event::read()? {
-            if key.kind != KeyEventKind::Press {
-                continue;
+        if event::poll(Duration::from_millis(500))? {
+            if let Event::Key(key) = event::read()? {
+                if key.kind != KeyEventKind::Press {
+                    continue;
+                }
+                match key.code {
+                    KeyCode::Char('q') | KeyCode::Esc => break,
+                    KeyCode::Up | KeyCode::Char('k') => app.move_up(),
+                    KeyCode::Down | KeyCode::Char('j') => app.move_down(),
+                    KeyCode::Right | KeyCode::Char('l') => app.move_right(),
+                    KeyCode::Left | KeyCode::Char('h') => app.move_left(),
+                    _ => {}
+                }
             }
-            match key.code {
-                KeyCode::Char('q') | KeyCode::Esc => break,
-                KeyCode::Up | KeyCode::Char('k') => app.move_up(),
-                KeyCode::Down | KeyCode::Char('j') => app.move_down(),
-                KeyCode::Right | KeyCode::Char('l') => app.move_right(),
-                KeyCode::Left | KeyCode::Char('h') => app.move_left(),
-                _ => {}
-            }
+        } else {
+            app.refresh();
         }
     }
 
