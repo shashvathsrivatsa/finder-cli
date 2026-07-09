@@ -334,12 +334,13 @@ impl Column {
 struct App {
     columns: Vec<Column>,
     active_col: usize,
+    pending_g: bool,
 }
 
 impl App {
     fn new(start: PathBuf) -> Self {
         let col = Column::new(start);
-        let mut app = App { columns: vec![col], active_col: 0 };
+        let mut app = App { columns: vec![col], active_col: 0, pending_g: false };
         // Expand into first selected dir if any
         app.maybe_push_child_column();
         app
@@ -515,15 +516,46 @@ fn main() -> io::Result<()> {
                 }
                 match key.code {
                     KeyCode::Char('q') | KeyCode::Esc => break,
-                    KeyCode::Up | KeyCode::Char('k') => app.move_up(),
-                    KeyCode::Down | KeyCode::Char('j') => app.move_down(),
-                    KeyCode::Right | KeyCode::Char('l') | KeyCode::Char('=') => app.move_right(),
-                    KeyCode::Left | KeyCode::Char('h') | KeyCode::Char('-') => app.move_left(),
+                    KeyCode::Up | KeyCode::Char('k') => { app.pending_g = false; app.move_up(); }
+                    KeyCode::Down | KeyCode::Char('j') => { app.pending_g = false; app.move_down(); }
+                    KeyCode::Right | KeyCode::Char('l') | KeyCode::Char('=') => { app.pending_g = false; app.move_right(); }
+                    KeyCode::Left | KeyCode::Char('h') | KeyCode::Char('-') => { app.pending_g = false; app.move_left(); }
                     KeyCode::Char('n') => {
+                        app.pending_g = false;
                         app.columns.drain(0..app.active_col);
                         app.active_col = 0;
                     }
-                    _ => {}
+                    KeyCode::Char('G') => {
+                        app.pending_g = false;
+                        let col = &mut app.columns[app.active_col];
+                        if col.grouped.row_count > 0 {
+                            col.selected_row = col.grouped.row_count - 1;
+                            col.sync_list_state();
+                        }
+                        app.maybe_push_child_column();
+                    }
+                    KeyCode::Char('g') => {
+                        if app.pending_g {
+                            app.pending_g = false;
+                            let col = &mut app.columns[app.active_col];
+                            col.selected_row = 0;
+                            col.sync_list_state();
+                            app.maybe_push_child_column();
+                        } else {
+                            app.pending_g = true;
+                        }
+                    }
+                    KeyCode::Char(c @ '0'..='9') => {
+                        app.pending_g = false;
+                        let n = if c == '0' { 9 } else { c as usize - '1' as usize };
+                        let col = &mut app.columns[app.active_col];
+                        if n < col.grouped.row_count {
+                            col.selected_row = n;
+                            col.sync_list_state();
+                        }
+                        app.maybe_push_child_column();
+                    }
+                    _ => { app.pending_g = false; }
                 }
             }
         } else {
