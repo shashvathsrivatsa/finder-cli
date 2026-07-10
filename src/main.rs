@@ -1,3 +1,4 @@
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::{fs, io};
 
@@ -24,6 +25,7 @@ struct Entry {
     name: String,
     path: PathBuf,
     is_dir: bool,
+    is_executable: bool,
 }
 
 fn icon_for_entry(entry: &Entry) -> (&'static str, Color) {
@@ -60,9 +62,16 @@ fn icon_for_entry(entry: &Entry) -> (&'static str, Color) {
     const NODE:     &str = "\u{E718}"; // dev-nodejs_small
     const TEXT:     &str = "\u{F0F6}"; // fa-file-text-o
     const LEGAL:    &str = "\u{F0E3}"; // fa-gavel
+    const BINARY:   &str = "\u{F471}"; // nf-oct-file_binary
+    const LIB:      &str = "\u{F1B2}"; // fa-cube
+    const RUN:      &str = "\u{F0E7}"; // fa-bolt (executable)
 
     if entry.is_dir {
         return (FOLDER, Color::Rgb(97, 175, 239));
+    }
+
+    if entry.is_executable {
+        return (RUN, Color::Rgb(80, 220, 120));
     }
 
     match entry.name.to_lowercase().as_str() {
@@ -111,6 +120,13 @@ fn icon_for_entry(entry: &Entry) -> (&'static str, Color) {
         "zip" | "tar" | "gz" | "bz2"
         | "xz" | "7z"                     => (ARCHIVE,  Color::Rgb(240, 214,  83)),
         "lock"                            => (LOCK,     Color::Rgb(183, 183, 183)),
+        // compiled artifacts
+        "o"                               => (BINARY,   Color::Rgb(150, 120,  80)),
+        "d"                               => (BINARY,   Color::Rgb(100, 100,  80)),
+        "rlib" | "rmeta"                  => (LIB,      Color::Rgb(200, 120,  80)),
+        "so" | "dylib" | "dll" | "a"      => (LIB,      Color::Rgb(180, 100,  60)),
+        "wasm"                            => (BINARY,   Color::Rgb(100, 150, 200)),
+        "pdb" | "map"                     => (BINARY,   Color::Rgb(120, 120, 120)),
         _                                 => (FILE,     Color::Rgb(180, 180, 180)),
     }
 }
@@ -121,6 +137,7 @@ fn group_label(ext: &str) -> &'static str {
         | "html" | "css" | "scss" | "py" | "go" | "c" | "cpp" | "h" | "hpp" | "java"
         | "swift" | "kt" | "rb" | "sh" | "zsh" | "bash" | "fish" | "md" | "txt" | "gitignore"
         | "env" | "sql" => "Developer",
+        "o" | "d" | "rlib" | "rmeta" | "so" | "dylib" | "dll" | "a" | "wasm" | "pdb" | "map" => "Compiled",
         "png" | "jpg" | "jpeg" | "gif" | "svg" | "ico" | "webp" | "bmp" | "tiff" => "Images",
         "mp4" | "mov" | "avi" | "mkv" | "webm" => "Video",
         "mp3" | "wav" | "flac" | "aac" | "ogg" => "Audio",
@@ -141,7 +158,10 @@ fn read_dir_entries(path: &Path) -> Vec<Entry> {
                 return None;
             }
             let is_dir = p.is_dir();
-            Some(Entry { name, path: p, is_dir })
+            let is_executable = !is_dir && p.metadata()
+                .map(|m| m.permissions().mode() & 0o111 != 0)
+                .unwrap_or(false);
+            Some(Entry { name, path: p, is_dir, is_executable })
         })
         .collect();
     entries.sort_by(|a, b| {
@@ -167,7 +187,9 @@ struct GroupedEntries {
 impl GroupedEntries {
     fn build(entries: Vec<Entry>) -> Self {
         let mut folder_indices: Vec<usize> = Vec::new();
+        let mut exec_indices: Vec<usize> = Vec::new();
         let mut dev_indices: Vec<usize> = Vec::new();
+        let mut compiled_indices: Vec<usize> = Vec::new();
         let mut image_indices: Vec<usize> = Vec::new();
         let mut video_indices: Vec<usize> = Vec::new();
         let mut audio_indices: Vec<usize> = Vec::new();
@@ -177,10 +199,13 @@ impl GroupedEntries {
         for (i, e) in entries.iter().enumerate() {
             if e.is_dir {
                 folder_indices.push(i);
+            } else if e.is_executable {
+                exec_indices.push(i);
             } else {
                 let ext = e.path.extension().and_then(|s| s.to_str()).unwrap_or("");
                 match group_label(ext) {
                     "Developer" => dev_indices.push(i),
+                    "Compiled" => compiled_indices.push(i),
                     "Images" => image_indices.push(i),
                     "Video" => video_indices.push(i),
                     "Audio" => audio_indices.push(i),
@@ -193,7 +218,9 @@ impl GroupedEntries {
         let mut groups: Vec<(String, Vec<usize>)> = Vec::new();
         for (label, idxs) in [
             ("Folders", folder_indices),
+            ("Executables", exec_indices),
             ("Developer", dev_indices),
+            ("Compiled", compiled_indices),
             ("Images", image_indices),
             ("Video", video_indices),
             ("Audio", audio_indices),
