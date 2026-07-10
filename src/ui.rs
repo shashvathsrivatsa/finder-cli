@@ -1,9 +1,9 @@
 use ratatui::{
     Frame,
-    layout::{Constraint, Direction, Layout},
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, List, Paragraph},
+    widgets::{Block, Clear, List, ListItem, Paragraph},
 };
 
 use crate::app::{App, ClipboardOp, CLIPBOARD_FLASH_MS};
@@ -17,10 +17,17 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     let area = chunks[0];
     let status_area = chunks[1];
 
-    if let Some(path) = &app.confirming_delete {
+    // Always show link icon on the left if a pane is linked
+    let link_prefix: Vec<Span> = if app.linked_pane.is_some() {
+        vec![Span::styled(" \u{F0C1} ", Style::default().fg(Color::Rgb(100, 180, 255)))]
+    } else {
+        vec![]
+    };
+
+    let status_spans: Option<Vec<Span>> = if let Some(path) = &app.confirming_delete {
         let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let kind = if path.is_dir() { "directory" } else { "file" };
-        let text = Line::from(vec![
+        Some(vec![
             Span::styled(format!("Delete {} ", kind), Style::default().fg(Color::Rgb(220, 50, 50))),
             Span::styled(format!("\"{}\"", name), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
             Span::styled("?  ", Style::default().fg(Color::Rgb(220, 50, 50))),
@@ -28,11 +35,10 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             Span::styled("es  ", Style::default().fg(Color::DarkGray)),
             Span::styled("[n]", Style::default().fg(Color::Rgb(220, 50, 50)).add_modifier(Modifier::BOLD)),
             Span::styled("o", Style::default().fg(Color::DarkGray)),
-        ]);
-        frame.render_widget(Paragraph::new(text), status_area);
+        ])
     } else if let Some((_, dst)) = &app.confirming_replace {
         let name = dst.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-        let text = Line::from(vec![
+        Some(vec![
             Span::styled("Replace ", Style::default().fg(Color::Rgb(220, 140, 50))),
             Span::styled(format!("\"{}\"", name), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
             Span::styled("?  ", Style::default().fg(Color::Rgb(220, 140, 50))),
@@ -40,8 +46,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             Span::styled("es  ", Style::default().fg(Color::DarkGray)),
             Span::styled("[n]", Style::default().fg(Color::Rgb(220, 50, 50)).add_modifier(Modifier::BOLD)),
             Span::styled("o", Style::default().fg(Color::DarkGray)),
-        ]);
-        frame.render_widget(Paragraph::new(text), status_area);
+        ])
     } else if let Some(cb) = &app.clipboard {
         if cb.set_at.elapsed().as_millis() < CLIPBOARD_FLASH_MS as u128 {
             let name = cb.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
@@ -49,12 +54,17 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                 ClipboardOp::Cut  => ("cut",  Color::Rgb(220, 140, 50)),
                 ClipboardOp::Copy => ("copy", Color::Rgb(100, 180, 255)),
             };
-            let text = Line::from(vec![
+            Some(vec![
                 Span::styled(format!("{}: ", verb), Style::default().fg(color)),
                 Span::styled(name, Style::default().fg(Color::DarkGray)),
-            ]);
-            frame.render_widget(Paragraph::new(text), status_area);
-        }
+            ])
+        } else { None }
+    } else { None };
+
+    if !link_prefix.is_empty() || status_spans.is_some() {
+        let mut spans = link_prefix;
+        if let Some(s) = status_spans { spans.extend(s); }
+        frame.render_widget(Paragraph::new(Line::from(spans)), status_area);
     }
 
     let num_cols = app.columns.len();
@@ -115,5 +125,55 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             .style(Style::default().fg(Color::Rgb(200, 200, 200)));
 
         frame.render_stateful_widget(list, inner, &mut col.list_state);
+    }
+
+    if let Some((ref panes, sel)) = app.pane_picker {
+        let current_count = panes.iter().filter(|p| p.same_session).count();
+        let has_others = panes.len() > current_count;
+        let has_current = current_count > 0;
+
+        // Build items list with section headers, track pane_idx -> item_idx
+        let mut items: Vec<ListItem> = Vec::new();
+        let mut pane_to_item: Vec<usize> = Vec::new();
+
+        if has_current {
+            items.push(ListItem::new(Line::from(vec![
+                Span::styled("  This session", Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD)),
+            ])));
+            for p in panes.iter().take(current_count) {
+                pane_to_item.push(items.len());
+                items.push(ListItem::new(Line::from(vec![Span::raw(format!("  {}", p.label))])));
+            }
+        }
+        if has_others {
+            if has_current { items.push(ListItem::new(Line::from(""))); }
+            items.push(ListItem::new(Line::from(vec![
+                Span::styled("  Other", Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD)),
+            ])));
+            for p in panes.iter().skip(current_count) {
+                pane_to_item.push(items.len());
+                items.push(ListItem::new(Line::from(vec![Span::raw(format!("  {}", p.label))])));
+            }
+        }
+
+        let visual_sel = pane_to_item.get(sel).copied().unwrap_or(0);
+        let height = (items.len() as u16 + 2).min(full_area.height.saturating_sub(2));
+        let width = 50u16.min(full_area.width.saturating_sub(4));
+        let x = (full_area.width.saturating_sub(width)) / 2;
+        let y = (full_area.height.saturating_sub(height)) / 2;
+        let popup_area = Rect { x, y, width, height };
+
+        let list = List::new(items)
+            .block(Block::bordered()
+                .title(Span::styled(" Pick pane  [u] unlink ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)))
+                .border_style(Style::default().fg(Color::Rgb(100, 180, 255)))
+                .style(Style::default().bg(Color::Black)))
+            .highlight_style(Style::default().bg(Color::Rgb(0, 92, 197)).add_modifier(Modifier::BOLD));
+
+        let mut list_state = ratatui::widgets::ListState::default();
+        list_state.select(Some(visual_sel));
+
+        frame.render_widget(Clear, popup_area);
+        frame.render_stateful_widget(list, popup_area, &mut list_state);
     }
 }

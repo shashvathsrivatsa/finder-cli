@@ -23,6 +23,13 @@ pub struct ClipboardEntry {
     pub set_at: Instant,
 }
 
+#[derive(Clone)]
+pub struct PaneInfo {
+    pub id: String,
+    pub label: String,
+    pub same_session: bool,
+}
+
 pub struct App {
     pub columns: Vec<Column>,
     pub active_col: usize,
@@ -34,6 +41,8 @@ pub struct App {
     pub clipboard: Option<ClipboardEntry>,
     pub confirming_replace: Option<(PathBuf, PathBuf)>, // (src, dst)
     pub focused: bool,
+    pub linked_pane: Option<PaneInfo>,
+    pub pane_picker: Option<(Vec<PaneInfo>, usize)>, // (panes, selected_idx)
 }
 
 impl App {
@@ -50,6 +59,8 @@ impl App {
             clipboard: None,
             confirming_replace: None,
             focused: true,
+            linked_pane: None,
+            pane_picker: None,
         };
         app.maybe_push_child_column();
         app

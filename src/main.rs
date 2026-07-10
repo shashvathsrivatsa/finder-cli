@@ -16,7 +16,7 @@ use crossterm::{
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
 
-use app::{App, ClipboardEntry, ClipboardOp, CLIPBOARD_FLASH_MS, qwerty_prefix_offset};
+use app::{App, ClipboardEntry, ClipboardOp, PaneInfo, CLIPBOARD_FLASH_MS, qwerty_prefix_offset};
 use rename::{RenameMode, RenameState};
 use ui::render;
 
@@ -39,6 +39,43 @@ fn copy_dir(src: &Path, dst: &Path) -> io::Result<()> {
         else { std::fs::copy(&entry.path(), &dst_path)?; }
     }
     Ok(())
+}
+
+fn list_panes() -> Vec<PaneInfo> {
+    let current_pane = std::env::var("TMUX_PANE").unwrap_or_default();
+    let current_session = std::process::Command::new("tmux")
+        .args(["display-message", "-p", "#S"])
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_default();
+    let Ok(out) = std::process::Command::new("tmux")
+        .args(["list-panes", "-a", "-F", "#{pane_id}\t#{session_name}\t#{session_name}:#{window_index}.#{pane_index}\t#{pane_current_command}"])
+        .output() else { return vec![]; };
+    let mut panes: Vec<PaneInfo> = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|line| {
+            let mut parts = line.splitn(4, '\t');
+            let id      = parts.next()?.to_string();
+            let session = parts.next()?.to_string();
+            let coord   = parts.next()?.to_string();
+            let cmd     = parts.next()?.trim().to_string();
+            if id == current_pane { return None; }
+            if cmd != "nvim" { return None; }
+            let same_session = session == current_session;
+            Some(PaneInfo { id, label: format!("{}  {}", coord, cmd), same_session })
+        })
+        .collect();
+    // current session first
+    panes.sort_by_key(|p| !p.same_session);
+    panes
+}
+
+fn open_in_linked_pane(pane_id: &str, path: &Path) {
+    let path_str = path.to_string_lossy();
+    let _ = std::process::Command::new("tmux")
+        .args(["send-keys", "-t", pane_id, &format!(":e {}\r", path_str)])
+        .status();
 }
 
 fn do_paste(entry: &ClipboardEntry, dst: &Path) -> io::Result<()> {
@@ -124,6 +161,28 @@ fn main() -> io::Result<()> {
                             app.maybe_push_child_column();
                         }
                         _ => { app.confirming_delete = None; }
+                    }
+                    continue;
+                }
+
+                // Pane picker intercepts all keys
+                if let Some((ref panes, ref mut sel)) = app.pane_picker {
+                    let panes = panes.clone();
+                    let count = panes.len();
+                    match key.code {
+                        KeyCode::Esc | KeyCode::Char('q') => { app.pane_picker = None; }
+                        KeyCode::Char('j') | KeyCode::Down  => { *sel = (*sel + 1).min(count.saturating_sub(1)); }
+                        KeyCode::Char('k') | KeyCode::Up    => { *sel = sel.saturating_sub(1); }
+                        KeyCode::Enter => {
+                            let chosen = panes[*sel].clone();
+                            app.linked_pane = Some(chosen);
+                            app.pane_picker = None;
+                        }
+                        KeyCode::Char('u') => {
+                            app.linked_pane = None;
+                            app.pane_picker = None;
+                        }
+                        _ => {}
                     }
                     continue;
                 }
@@ -347,6 +406,8 @@ fn main() -> io::Result<()> {
                             if is_dir {
                                 app.cd_target = Some(path);
                                 break;
+                            } else if let Some(ref pane) = app.linked_pane.clone() {
+                                open_in_linked_pane(&pane.id, &path);
                             } else {
                                 open_in_nvim(&path)?;
                                 terminal.clear()?;
@@ -361,10 +422,23 @@ fn main() -> io::Result<()> {
                             let (path, is_dir) = (e.path.clone(), e.is_dir);
                             if is_dir {
                                 app.move_right();
+                            } else if let Some(ref pane) = app.linked_pane.clone() {
+                                open_in_linked_pane(&pane.id, &path);
                             } else {
                                 open_in_nvim(&path)?;
                                 terminal.clear()?;
                             }
+                        }
+                    }
+                    KeyCode::Char('P') => {
+                        app.pending_g = false;
+                        app.pending_prefix = None;
+                        let panes = list_panes();
+                        if !panes.is_empty() {
+                            let sel = app.linked_pane.as_ref()
+                                .and_then(|lp| panes.iter().position(|p| p.id == lp.id))
+                                .unwrap_or(0);
+                            app.pane_picker = Some((panes, sel));
                         }
                     }
                     KeyCode::Char('R') => {
