@@ -5,6 +5,7 @@ use ratatui::text::Span;
 pub enum RenameMode {
     Normal,
     Insert,
+    Visual,
 }
 
 pub struct RenameState {
@@ -12,13 +13,14 @@ pub struct RenameState {
     pub cursor: usize,
     pub mode: RenameMode,
     pub pending: String, // accumulates multi-key sequences: "d", "c", "di", "ci", "r"
+    pub visual_anchor: usize,
 }
 
 impl RenameState {
     pub fn new(name: &str) -> Self {
         let cursor = name.rfind('.').unwrap_or(name.len());
         let cursor = if cursor == 0 { name.len() } else { cursor };
-        RenameState { text: name.to_string(), cursor, mode: RenameMode::Insert, pending: String::new() }
+        RenameState { text: name.to_string(), cursor, mode: RenameMode::Insert, pending: String::new(), visual_anchor: 0 }
     }
 
     pub fn char_count(&self) -> usize { self.text.chars().count() }
@@ -28,7 +30,7 @@ impl RenameState {
     }
 
     fn clamp(&mut self) {
-        if self.mode == RenameMode::Normal {
+        if self.mode == RenameMode::Normal || self.mode == RenameMode::Visual {
             let max = self.char_count().saturating_sub(1);
             if self.cursor > max { self.cursor = max; }
         }
@@ -65,14 +67,14 @@ impl RenameState {
     pub fn move_left(&mut self) { if self.cursor > 0 { self.cursor -= 1; } }
 
     pub fn move_right(&mut self) {
-        let max = if self.mode == RenameMode::Normal { self.char_count().saturating_sub(1) } else { self.char_count() };
+        let max = if self.mode == RenameMode::Insert { self.char_count() } else { self.char_count().saturating_sub(1) };
         if self.cursor < max { self.cursor += 1; }
     }
 
     pub fn move_line_start(&mut self) { self.cursor = 0; }
 
     pub fn move_line_end(&mut self) {
-        self.cursor = if self.mode == RenameMode::Normal { self.char_count().saturating_sub(1) } else { self.char_count() };
+        self.cursor = if self.mode == RenameMode::Insert { self.char_count() } else { self.char_count().saturating_sub(1) };
     }
 
     pub fn move_word_forward(&mut self) {
@@ -151,7 +153,6 @@ impl RenameState {
 
     // ── range deletions ───────────────────────────────────────────────────────
 
-    /// Delete chars [from, to] inclusive.
     fn delete_range(&mut self, from: usize, to: usize) {
         if from > to { return; }
         let chars: Vec<char> = self.text.chars().collect();
@@ -161,13 +162,11 @@ impl RenameState {
         self.clamp();
     }
 
-    /// de / ce — delete to end of current word (inclusive)
     pub fn delete_to_word_end(&mut self) {
         let end = self.word_end_at(self.cursor);
         self.delete_range(self.cursor, end);
     }
 
-    /// dw — delete to start of next word (including trailing whitespace)
     pub fn delete_word_forward(&mut self) {
         let chars: Vec<char> = self.text.chars().collect();
         let len = chars.len();
@@ -186,7 +185,6 @@ impl RenameState {
         }
     }
 
-    /// db / cb — delete to start of current word
     pub fn delete_to_word_start(&mut self) {
         let start = self.word_start_at(self.cursor);
         if start == self.cursor { return; }
@@ -196,22 +194,32 @@ impl RenameState {
         self.clamp();
     }
 
-    /// d$ / D / c$ / C — delete from cursor to end of text
     pub fn delete_to_line_end(&mut self) {
         self.text = self.text.chars().take(self.cursor).collect();
         self.clamp();
     }
 
-    /// d0 / c0 — delete from start of text to cursor
     pub fn delete_to_line_start(&mut self) {
         self.text = self.text.chars().skip(self.cursor).collect();
         self.cursor = 0;
     }
 
-    /// diw / ciw — delete the word under the cursor
     pub fn delete_inner_word(&mut self) {
         let start = self.word_start_at(self.cursor);
         let end = self.word_end_at(self.cursor);
+        self.delete_range(start, end);
+    }
+
+    // ── visual selection ──────────────────────────────────────────────────────
+
+    pub fn visual_range(&self) -> (usize, usize) {
+        let start = self.visual_anchor.min(self.cursor);
+        let end   = self.visual_anchor.max(self.cursor);
+        (start, end.min(self.char_count().saturating_sub(1)))
+    }
+
+    pub fn delete_visual_selection(&mut self) {
+        let (start, end) = self.visual_range();
         self.delete_range(start, end);
     }
 
@@ -224,19 +232,24 @@ impl RenameState {
 
     pub fn enter_normal(&mut self) {
         self.mode = RenameMode::Normal;
-        if self.cursor > 0 { self.cursor -= 1; }
+        if self.cursor > 0 && self.mode != RenameMode::Insert { self.cursor -= 1; }
         self.clamp();
+    }
+
+    pub fn enter_visual(&mut self) {
+        self.mode = RenameMode::Visual;
+        self.visual_anchor = self.cursor;
     }
 
     // ── rendering ─────────────────────────────────────────────────────────────
 
     pub fn name_spans(&self, icon: &'static str, icon_color: Color) -> Vec<Span<'static>> {
         let chars: Vec<char> = self.text.chars().collect();
-        let before: String = chars[..self.cursor].iter().collect();
         let icon_span = Span::styled(format!("{} ", icon), Style::default().fg(icon_color));
 
         match self.mode {
             RenameMode::Insert => {
+                let before: String = chars[..self.cursor].iter().collect();
                 let after: String = chars[self.cursor..].iter().collect();
                 vec![
                     icon_span,
@@ -246,6 +259,7 @@ impl RenameState {
                 ]
             }
             RenameMode::Normal => {
+                let before: String = chars[..self.cursor].iter().collect();
                 if self.cursor < chars.len() {
                     let cur: String = std::iter::once(chars[self.cursor]).collect();
                     let after: String = chars[self.cursor + 1..].iter().collect();
@@ -262,6 +276,18 @@ impl RenameState {
                         Span::styled(" ", Style::default().bg(Color::White).fg(Color::Black)),
                     ]
                 }
+            }
+            RenameMode::Visual => {
+                let (sel_start, sel_end) = self.visual_range();
+                let before: String = chars[..sel_start].iter().collect();
+                let selected: String = chars[sel_start..=sel_end.min(chars.len().saturating_sub(1))].iter().collect();
+                let after: String = if sel_end + 1 < chars.len() { chars[sel_end + 1..].iter().collect() } else { String::new() };
+                vec![
+                    icon_span,
+                    Span::raw(before),
+                    Span::styled(selected, Style::default().bg(Color::Rgb(60, 60, 60)).fg(Color::White)),
+                    Span::raw(after),
+                ]
             }
         }
     }

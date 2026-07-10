@@ -169,6 +169,27 @@ fn main() -> io::Result<()> {
                             KeyCode::Char(c)  => rs.insert_char(c),
                             _ => {}
                         },
+                        RenameMode::Visual => {
+                            match key.code {
+                                KeyCode::Esc | KeyCode::Char('v') => { rs.mode = rename::RenameMode::Normal; }
+                                KeyCode::Char('h') | KeyCode::Left  => rs.move_left(),
+                                KeyCode::Char('l') | KeyCode::Right => rs.move_right(),
+                                KeyCode::Char('w') => rs.move_word_forward(),
+                                KeyCode::Char('b') => rs.move_word_backward(),
+                                KeyCode::Char('e') => rs.move_word_end(),
+                                KeyCode::Char('0') => rs.move_line_start(),
+                                KeyCode::Char('$') => rs.move_line_end(),
+                                KeyCode::Char('d') | KeyCode::Char('x') => {
+                                    rs.delete_visual_selection();
+                                    rs.mode = rename::RenameMode::Normal;
+                                }
+                                KeyCode::Char('c') => {
+                                    rs.delete_visual_selection();
+                                    rs.enter_insert_before();
+                                }
+                                _ => {}
+                            }
+                        }
                         RenameMode::Normal => {
                             let confirm_rename = |rs: &RenameState, app: &mut App| {
                                 let col = &app.columns[app.active_col];
@@ -248,6 +269,7 @@ fn main() -> io::Result<()> {
                                 (_, KeyCode::Char('a')) => rs.enter_insert_after(),
                                 (_, KeyCode::Char('I')) => rs.enter_insert_start(),
                                 (_, KeyCode::Char('A')) => rs.enter_insert_end(),
+                                (_, KeyCode::Char('v')) => rs.enter_visual(),
                                 (_, KeyCode::Char('d')) => rs.pending = "d".into(),
                                 (_, KeyCode::Char('c')) => rs.pending = "c".into(),
                                 (_, KeyCode::Char('r')) => rs.pending = "r".into(),
@@ -483,6 +505,7 @@ fn main() -> io::Result<()> {
                                 cursor: 0,
                                 mode: RenameMode::Insert,
                                 pending: String::new(),
+                                visual_anchor: 0,
                             });
                             app.maybe_push_child_column();
                         }
@@ -519,6 +542,7 @@ fn main() -> io::Result<()> {
                                 cursor: 0,
                                 mode: RenameMode::Insert,
                                 pending: String::new(),
+                                visual_anchor: 0,
                             });
                             app.maybe_push_child_column();
                         }
