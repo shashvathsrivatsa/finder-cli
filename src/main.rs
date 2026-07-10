@@ -20,6 +20,27 @@ use app::{App, qwerty_prefix_offset};
 use rename::{RenameMode, RenameState};
 use ui::render;
 
+fn copy_dest(path: &Path) -> PathBuf {
+    let parent = path.parent().unwrap_or(Path::new("."));
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+    let ext  = path.extension().and_then(|s| s.to_str());
+    let make = |n: u32| {
+        let suffix = if n == 1 { "copy".to_string() } else { format!("copy {}", n) };
+        if let Some(e) = ext { format!("{} {}.{}", stem, suffix, e) } else { format!("{} {}", stem, suffix) }
+    };
+    (1u32..).map(|n| parent.join(make(n))).find(|p| !p.exists()).unwrap()
+}
+
+fn copy_dir(src: &Path, dst: &Path) -> io::Result<()> {
+    std::fs::create_dir(dst)?;
+    for entry in std::fs::read_dir(src)?.flatten() {
+        let dst_path = dst.join(entry.file_name());
+        if entry.file_type()?.is_dir() { copy_dir(&entry.path(), &dst_path)?; }
+        else { std::fs::copy(&entry.path(), &dst_path)?; }
+    }
+    Ok(())
+}
+
 fn open_tty() -> io::Result<std::fs::File> {
     std::fs::OpenOptions::new().read(true).write(true).open("/dev/tty")
 }
@@ -329,6 +350,17 @@ fn main() -> io::Result<()> {
                                     let _ = stdin.write_all(path.as_bytes());
                                 }
                             }
+                        }
+                    }
+                    KeyCode::Char('K') => {
+                        app.pending_g = false;
+                        app.pending_prefix = None;
+                        let col = &app.columns[app.active_col];
+                        if let Some(e) = col.grouped.entry_at_row(col.selected_row) {
+                            let dst = copy_dest(&e.path);
+                            if e.is_dir { copy_dir(&e.path, &dst).ok(); }
+                            else { std::fs::copy(&e.path, &dst).ok(); }
+                            app.refresh();
                         }
                     }
                     KeyCode::Char('D') => {
