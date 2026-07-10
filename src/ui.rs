@@ -6,7 +6,7 @@ use ratatui::{
     widgets::{Block, Clear, List, ListItem, Paragraph},
 };
 
-use crate::app::{App, ClipboardOp, CLIPBOARD_FLASH_MS};
+use crate::app::{App, ClipboardOp, PaneInfo, CLIPBOARD_FLASH_MS};
 
 pub fn render(frame: &mut Frame, app: &mut App) {
     let full_area = frame.area();
@@ -136,13 +136,27 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         let mut items: Vec<ListItem> = Vec::new();
         let mut pane_to_item: Vec<usize> = Vec::new();
 
+        let linked_id = app.linked_pane.as_ref().map(|lp| lp.id.as_str());
+
+        let make_pane_item = |p: &PaneInfo| {
+            let is_linked = linked_id.is_some_and(|id| id == p.id);
+            if is_linked {
+                ListItem::new(Line::from(vec![
+                    Span::styled("  \u{F0C1}  ", Style::default().fg(Color::Rgb(100, 180, 255))),
+                    Span::raw(p.label.clone()),
+                ]))
+            } else {
+                ListItem::new(Line::from(vec![Span::raw(format!("  {}", p.label))]))
+            }
+        };
+
         if has_current {
             items.push(ListItem::new(Line::from(vec![
                 Span::styled("  This session", Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD)),
             ])));
             for p in panes.iter().take(current_count) {
                 pane_to_item.push(items.len());
-                items.push(ListItem::new(Line::from(vec![Span::raw(format!("  {}", p.label))])));
+                items.push(make_pane_item(p));
             }
         }
         if has_others {
@@ -152,7 +166,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             ])));
             for p in panes.iter().skip(current_count) {
                 pane_to_item.push(items.len());
-                items.push(ListItem::new(Line::from(vec![Span::raw(format!("  {}", p.label))])));
+                items.push(make_pane_item(p));
             }
         }
 
