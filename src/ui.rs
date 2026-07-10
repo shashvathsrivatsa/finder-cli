@@ -1,0 +1,97 @@
+use ratatui::{
+    Frame,
+    layout::{Constraint, Direction, Layout},
+    style::{Color, Modifier, Style},
+    text::{Line, Span},
+    widgets::{Block, List, Paragraph},
+};
+
+use crate::app::App;
+
+pub fn render(frame: &mut Frame, app: &mut App) {
+    let full_area = frame.area();
+
+    let (area, confirm_area) = if app.confirming_delete.is_some() {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(0), Constraint::Length(1)])
+            .split(full_area);
+        (chunks[0], Some(chunks[1]))
+    } else {
+        (full_area, None)
+    };
+
+    if let (Some(path), Some(bar)) = (&app.confirming_delete, confirm_area) {
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let kind = if path.is_dir() { "directory" } else { "file" };
+        let block = Block::new().style(Style::default().bg(Color::Black));
+        let text = Line::from(vec![
+            Span::styled(format!("Delete {} ", kind), Style::default().fg(Color::Rgb(220, 50, 50))),
+            Span::styled(format!("\"{}\"", name), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled("?  ", Style::default().fg(Color::Rgb(220, 50, 50))),
+            Span::styled("[y]", Style::default().fg(Color::Rgb(80, 200, 120)).add_modifier(Modifier::BOLD)),
+            Span::styled("es  ", Style::default().fg(Color::DarkGray)),
+            Span::styled("[n]", Style::default().fg(Color::Rgb(220, 50, 50)).add_modifier(Modifier::BOLD)),
+            Span::styled("o", Style::default().fg(Color::DarkGray)),
+        ]);
+        frame.render_widget(Paragraph::new(text).block(block), bar);
+    }
+
+    let num_cols = app.columns.len();
+
+    const COL_WIDTH: u16 = 32;
+    let visible_cols = ((area.width / COL_WIDTH) as usize).max(1).min(num_cols);
+    let preferred_start = app.active_col.saturating_sub(visible_cols.saturating_sub(2));
+    let start_col = preferred_start.min(num_cols.saturating_sub(visible_cols));
+
+    let visible_count = (num_cols - start_col).min(visible_cols);
+    let mut constraints: Vec<Constraint> =
+        (0..visible_count).map(|_| Constraint::Length(COL_WIDTH)).collect();
+    constraints.push(Constraint::Min(0));
+
+    let col_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints(constraints)
+        .split(area);
+
+    for (vi, ci) in (start_col..num_cols).enumerate() {
+        let col = &mut app.columns[ci];
+        let is_active = ci == app.active_col;
+
+        let folder_name = col
+            .path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "/".to_string());
+
+        let block = Block::bordered()
+            .title(Span::styled(
+                format!(" {} ", folder_name),
+                Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+            ))
+            .border_style(Style::default().fg(Color::Rgb(60, 60, 60)))
+            .style(Style::default().bg(Color::Black));
+
+        let inner = block.inner(col_chunks[vi]);
+        frame.render_widget(block, col_chunks[vi]);
+
+        let selected_path = col.selected_entry().map(|e| e.path.clone());
+        // Only pass rename input for the active column
+        let renaming = if is_active { app.renaming.as_ref() } else { None };
+        let (items, _) = col.grouped.list_items(selected_path.as_deref(), renaming);
+
+        let highlight_style = if is_active && app.renaming.is_some() {
+            Style::default() // cursor span handles its own highlight; don't let row bg override it
+        } else if is_active {
+            Style::default().bg(Color::Rgb(0, 92, 197)).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().bg(Color::Rgb(60, 60, 60))
+        };
+
+        let list = List::new(items)
+            .highlight_style(highlight_style)
+            .style(Style::default().fg(Color::Rgb(200, 200, 200)));
+
+        frame.render_stateful_widget(list, inner, &mut col.list_state);
+    }
+}
