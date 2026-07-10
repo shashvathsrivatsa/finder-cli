@@ -65,6 +65,15 @@ fn icon_for_entry(entry: &Entry) -> (&'static str, Color) {
     const BINARY:   &str = "\u{F471}"; // nf-oct-file_binary
     const LIB:      &str = "\u{F1B2}"; // fa-cube
     const RUN:      &str = "\u{F0E7}"; // fa-bolt (executable)
+    const SWIFT:    &str = "\u{E755}"; // dev-swift
+    const KOTLIN:   &str = "\u{E634}"; // seti-kotlin
+    const LUA:      &str = "\u{E620}"; // seti-lua
+    const VIM:      &str = "\u{E62B}"; // seti-vim
+    const NIX:      &str = "\u{F313}"; // nf-linux-nixos
+    const TERRAFORM: &str = "\u{E69A}"; // seti-terraform
+    const FONT:     &str = "\u{F031}"; // fa-font
+    const KEY:      &str = "\u{F805}"; // nf-mdi-key
+    const CSV:      &str = "\u{F1C3}"; // fa-file-excel-o
 
     if entry.is_dir {
         return (FOLDER, Color::Rgb(97, 175, 239));
@@ -96,19 +105,30 @@ fn icon_for_entry(entry: &Entry) -> (&'static str, Color) {
         "html" | "htm"                    => (HTML,     Color::Rgb(228,  79,  38)),
         "css"                             => (CSS,      Color::Rgb( 38, 143, 222)),
         "scss" | "sass"                   => (SCSS,     Color::Rgb(204, 102, 153)),
-        "py" | "pyi"                      => (PYTHON,   Color::Rgb( 55, 118, 171)),
-        "go"                              => (GO,       Color::Rgb(  1, 173, 216)),
-        "c" | "h"                         => (C,        Color::Rgb( 85, 170, 255)),
-        "cpp" | "cc" | "cxx" | "hpp"     => (CPP,      Color::Rgb(243,  75, 125)),
-        "java"                            => (JAVA,     Color::Rgb(176, 114,  25)),
-        "rb"                              => (RUBY,     Color::Rgb(204,  52,  45)),
-        "sh" | "bash" | "zsh" | "fish"   => (SHELL,    Color::Rgb(121, 182, 122)),
-        "md" | "mdx"                      => (MARKDOWN, Color::Rgb( 66, 165, 245)),
-        "toml"                            => (TOML,     Color::Rgb(156, 175, 183)),
-        "yaml" | "yml"                    => (YAML,     Color::Rgb(204, 204, 204)),
-        "sql"                             => (SQL,      Color::Rgb(255, 160, 122)),
-        "env"                             => (COG,      Color::Rgb(240, 214,  83)),
-        "txt"                             => (TEXT,     Color::Rgb(187, 187, 187)),
+        "py" | "pyi"                      => (PYTHON,    Color::Rgb( 55, 118, 171)),
+        "go"                              => (GO,        Color::Rgb(  1, 173, 216)),
+        "c" | "h"                         => (C,         Color::Rgb( 85, 170, 255)),
+        "cpp" | "cc" | "cxx" | "hpp"     => (CPP,       Color::Rgb(243,  75, 125)),
+        "java"                            => (JAVA,      Color::Rgb(176, 114,  25)),
+        "rb"                              => (RUBY,      Color::Rgb(204,  52,  45)),
+        "swift"                           => (SWIFT,     Color::Rgb(240,  88,  35)),
+        "kt" | "kts"                      => (KOTLIN,    Color::Rgb(127,  82, 255)),
+        "lua"                             => (LUA,       Color::Rgb( 66, 132, 204)),
+        "vim" | "vimrc" | "nvim"          => (VIM,       Color::Rgb( 41, 154,  77)),
+        "nix"                             => (NIX,       Color::Rgb( 80, 120, 200)),
+        "tf" | "tfvars" | "tfstate"       => (TERRAFORM, Color::Rgb( 95,  64, 191)),
+        "sh" | "bash" | "zsh" | "fish"   => (SHELL,     Color::Rgb(121, 182, 122)),
+        "md" | "mdx"                      => (MARKDOWN,  Color::Rgb( 66, 165, 245)),
+        "toml"                            => (TOML,      Color::Rgb(156, 175, 183)),
+        "yaml" | "yml"                    => (YAML,      Color::Rgb(204, 204, 204)),
+        "ini" | "cfg" | "conf"            => (COG,       Color::Rgb(180, 180, 120)),
+        "env"                             => (KEY,       Color::Rgb(240, 214,  83)),
+        "sql"                             => (SQL,       Color::Rgb(255, 160, 122)),
+        "csv"                             => (CSV,       Color::Rgb( 33, 150,  83)),
+        "txt"                             => (TEXT,      Color::Rgb(187, 187, 187)),
+        "ttf" | "otf" | "woff" | "woff2" => (FONT,      Color::Rgb(200, 160, 255)),
+        "pem" | "key" | "crt" | "cert"
+        | "p12" | "pfx" | "ca-bundle"    => (KEY,       Color::Rgb(255, 200,  50)),
         "png" | "jpg" | "jpeg" | "gif"
         | "webp" | "bmp" | "tiff" | "ico"
         | "svg"                           => (IMAGE,    Color::Rgb(167, 215,  97)),
@@ -133,15 +153,21 @@ fn icon_for_entry(entry: &Entry) -> (&'static str, Color) {
 
 fn group_label(ext: &str) -> &'static str {
     match ext {
-        "rs" | "toml" | "lock" | "json" | "yaml" | "yml" | "ts" | "tsx" | "js" | "jsx"
-        | "html" | "css" | "scss" | "py" | "go" | "c" | "cpp" | "h" | "hpp" | "java"
-        | "swift" | "kt" | "rb" | "sh" | "zsh" | "bash" | "fish" | "md" | "txt" | "gitignore"
-        | "env" | "sql" => "Developer",
+        "rs" | "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" | "mts" | "cts"
+        | "html" | "htm" | "css" | "scss" | "sass"
+        | "py" | "pyi" | "go" | "c" | "h" | "cpp" | "cc" | "cxx" | "hpp"
+        | "java" | "swift" | "kt" | "kts" | "rb" | "lua" | "sql" => "Developer",
+        "toml" | "yaml" | "yml" | "json" | "ini" | "cfg" | "conf" | "env"
+        | "tf" | "tfvars" | "tfstate" | "gitignore" | "lock" => "Config",
+        "sh" | "bash" | "zsh" | "fish" | "vim" | "nix" => "Scripts",
+        "md" | "mdx" | "txt" | "csv" | "pdf" | "doc" | "docx"
+        | "xls" | "xlsx" | "ppt" | "pptx" => "Documents",
         "o" | "d" | "rlib" | "rmeta" | "so" | "dylib" | "dll" | "a" | "wasm" | "pdb" | "map" => "Compiled",
         "png" | "jpg" | "jpeg" | "gif" | "svg" | "ico" | "webp" | "bmp" | "tiff" => "Images",
         "mp4" | "mov" | "avi" | "mkv" | "webm" => "Video",
         "mp3" | "wav" | "flac" | "aac" | "ogg" => "Audio",
-        "pdf" | "doc" | "docx" | "xls" | "xlsx" | "ppt" | "pptx" => "Documents",
+        "ttf" | "otf" | "woff" | "woff2" => "Fonts",
+        "pem" | "key" | "crt" | "cert" | "p12" | "pfx" | "ca-bundle" => "Security",
         _ => "Other",
     }
 }
@@ -189,11 +215,15 @@ impl GroupedEntries {
         let mut folder_indices: Vec<usize> = Vec::new();
         let mut exec_indices: Vec<usize> = Vec::new();
         let mut dev_indices: Vec<usize> = Vec::new();
+        let mut config_indices: Vec<usize> = Vec::new();
+        let mut script_indices: Vec<usize> = Vec::new();
         let mut compiled_indices: Vec<usize> = Vec::new();
         let mut image_indices: Vec<usize> = Vec::new();
         let mut video_indices: Vec<usize> = Vec::new();
         let mut audio_indices: Vec<usize> = Vec::new();
         let mut doc_indices: Vec<usize> = Vec::new();
+        let mut font_indices: Vec<usize> = Vec::new();
+        let mut security_indices: Vec<usize> = Vec::new();
         let mut other_indices: Vec<usize> = Vec::new();
 
         for (i, e) in entries.iter().enumerate() {
@@ -204,28 +234,36 @@ impl GroupedEntries {
             } else {
                 let ext = e.path.extension().and_then(|s| s.to_str()).unwrap_or("");
                 match group_label(ext) {
-                    "Developer" => dev_indices.push(i),
-                    "Compiled" => compiled_indices.push(i),
-                    "Images" => image_indices.push(i),
-                    "Video" => video_indices.push(i),
-                    "Audio" => audio_indices.push(i),
-                    "Documents" => doc_indices.push(i),
-                    _ => other_indices.push(i),
+                    "Developer"  => dev_indices.push(i),
+                    "Config"     => config_indices.push(i),
+                    "Scripts"    => script_indices.push(i),
+                    "Compiled"   => compiled_indices.push(i),
+                    "Images"     => image_indices.push(i),
+                    "Video"      => video_indices.push(i),
+                    "Audio"      => audio_indices.push(i),
+                    "Documents"  => doc_indices.push(i),
+                    "Fonts"      => font_indices.push(i),
+                    "Security"   => security_indices.push(i),
+                    _            => other_indices.push(i),
                 }
             }
         }
 
         let mut groups: Vec<(String, Vec<usize>)> = Vec::new();
         for (label, idxs) in [
-            ("Folders", folder_indices),
+            ("Folders",     folder_indices),
             ("Executables", exec_indices),
-            ("Developer", dev_indices),
-            ("Compiled", compiled_indices),
-            ("Images", image_indices),
-            ("Video", video_indices),
-            ("Audio", audio_indices),
-            ("Documents", doc_indices),
-            ("Other", other_indices),
+            ("Developer",   dev_indices),
+            ("Config",      config_indices),
+            ("Scripts",     script_indices),
+            ("Compiled",    compiled_indices),
+            ("Images",      image_indices),
+            ("Video",       video_indices),
+            ("Audio",       audio_indices),
+            ("Documents",   doc_indices),
+            ("Fonts",       font_indices),
+            ("Security",    security_indices),
+            ("Other",       other_indices),
         ] {
             if !idxs.is_empty() {
                 groups.push((label.to_string(), idxs));
@@ -572,7 +610,15 @@ fn open_tty() -> io::Result<std::fs::File> {
 fn open_in_nvim(path: &Path) -> io::Result<()> {
     disable_raw_mode()?;
     execute!(open_tty()?, LeaveAlternateScreen, DisableMouseCapture)?;
-    std::process::Command::new("nvim").arg(path).status()?;
+    let tty_in  = std::fs::OpenOptions::new().read(true).write(true).open("/dev/tty")?;
+    let tty_out = std::fs::OpenOptions::new().read(true).write(true).open("/dev/tty")?;
+    let tty_err = std::fs::OpenOptions::new().read(true).write(true).open("/dev/tty")?;
+    std::process::Command::new("nvim")
+        .arg(path)
+        .stdin(tty_in)
+        .stdout(tty_out)
+        .stderr(tty_err)
+        .status()?;
     enable_raw_mode()?;
     execute!(open_tty()?, EnterAlternateScreen, EnableMouseCapture)?;
     Ok(())
@@ -671,6 +717,25 @@ fn main() -> io::Result<()> {
                                 open_in_nvim(&path)?;
                                 terminal.clear()?;
                             }
+                        }
+                    }
+                    KeyCode::Char('x') => {
+                        app.pending_g = false;
+                        app.pending_prefix = None;
+                        let col = &app.columns[app.active_col];
+                        if let Some(e) = col.grouped.entry_at_row(col.selected_row) {
+                            std::process::Command::new("open").arg(&e.path).spawn().ok();
+                        }
+                    }
+                    KeyCode::Char('f') => {
+                        app.pending_g = false;
+                        app.pending_prefix = None;
+                        let col = &app.columns[app.active_col];
+                        if let Some(e) = col.grouped.entry_at_row(col.selected_row) {
+                            std::process::Command::new("open")
+                                .arg("-R")
+                                .arg(&e.path)
+                                .spawn().ok();
                         }
                     }
                     KeyCode::Char(c) if qwerty_prefix_offset(c).is_some() => {
