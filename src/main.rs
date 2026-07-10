@@ -362,6 +362,7 @@ struct App {
     active_col: usize,
     pending_g: bool,
     pending_prefix: Option<usize>, // row offset from a qwerty prefix key
+    cd_target: Option<PathBuf>,
 }
 
 fn qwerty_prefix_offset(c: char) -> Option<usize> {
@@ -385,7 +386,7 @@ fn jump_label(row: usize) -> String {
 impl App {
     fn new(start: PathBuf) -> Self {
         let col = Column::new(start);
-        let mut app = App { columns: vec![col], active_col: 0, pending_g: false, pending_prefix: None };
+        let mut app = App { columns: vec![col], active_col: 0, pending_g: false, pending_prefix: None, cd_target: None };
         // Expand into first selected dir if any
         app.maybe_push_child_column();
         app
@@ -537,12 +538,16 @@ fn render(frame: &mut Frame, app: &mut App) {
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
+fn open_tty() -> io::Result<std::fs::File> {
+    std::fs::OpenOptions::new().read(true).write(true).open("/dev/tty")
+}
+
 fn open_in_nvim(path: &Path) -> io::Result<()> {
     disable_raw_mode()?;
-    execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture)?;
+    execute!(open_tty()?, LeaveAlternateScreen, DisableMouseCapture)?;
     std::process::Command::new("nvim").arg(path).status()?;
     enable_raw_mode()?;
-    execute!(io::stdout(), EnterAlternateScreen, EnableMouseCapture)?;
+    execute!(open_tty()?, EnterAlternateScreen, EnableMouseCapture)?;
     Ok(())
 }
 
@@ -553,9 +558,9 @@ fn main() -> io::Result<()> {
         .unwrap_or_else(|| std::env::current_dir().unwrap());
 
     enable_raw_mode()?;
-    let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
-    let backend = CrosstermBackend::new(stdout);
+    let mut tty = open_tty()?;
+    execute!(tty, EnterAlternateScreen, EnableMouseCapture)?;
+    let backend = CrosstermBackend::new(tty);
     let mut terminal = Terminal::new(backend)?;
 
     let mut app = App::new(start);
@@ -612,7 +617,22 @@ fn main() -> io::Result<()> {
                         }
                         app.maybe_push_child_column();
                     }
-                    KeyCode::Enter | KeyCode::Char(' ') => {
+                    KeyCode::Enter => {
+                        app.pending_g = false;
+                        app.pending_prefix = None;
+                        let col = &app.columns[app.active_col];
+                        if let Some(e) = col.grouped.entry_at_row(col.selected_row) {
+                            let (path, is_dir) = (e.path.clone(), e.is_dir);
+                            if is_dir {
+                                app.cd_target = Some(path);
+                                break;
+                            } else {
+                                open_in_nvim(&path)?;
+                                terminal.clear()?;
+                            }
+                        }
+                    }
+                    KeyCode::Char(' ') => {
                         app.pending_g = false;
                         app.pending_prefix = None;
                         let col = &app.columns[app.active_col];
@@ -641,5 +661,8 @@ fn main() -> io::Result<()> {
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
     terminal.show_cursor()?;
+    if let Some(path) = app.cd_target {
+        println!("{}", path.display());
+    }
     Ok(())
 }
