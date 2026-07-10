@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::time::Instant;
 
 use crate::column::Column;
 use crate::entry::read_dir_entries;
@@ -9,6 +10,19 @@ pub fn qwerty_prefix_offset(c: char) -> Option<usize> {
     "poiuytrew".find(c).map(|i| (i + 1) * 10)
 }
 
+// Tweak this to change how long the "cut/copy: filename" flash shows
+pub const CLIPBOARD_FLASH_MS: u64 = 200;
+
+#[derive(Clone, PartialEq)]
+pub enum ClipboardOp { Cut, Copy }
+
+#[derive(Clone)]
+pub struct ClipboardEntry {
+    pub op: ClipboardOp,
+    pub path: PathBuf,
+    pub set_at: Instant,
+}
+
 pub struct App {
     pub columns: Vec<Column>,
     pub active_col: usize,
@@ -17,6 +31,8 @@ pub struct App {
     pub cd_target: Option<PathBuf>,
     pub renaming: Option<RenameState>,
     pub confirming_delete: Option<PathBuf>,
+    pub clipboard: Option<ClipboardEntry>,
+    pub confirming_replace: Option<(PathBuf, PathBuf)>, // (src, dst)
     pub focused: bool,
 }
 
@@ -31,6 +47,8 @@ impl App {
             cd_target: None,
             renaming: None,
             confirming_delete: None,
+            clipboard: None,
+            confirming_replace: None,
             focused: true,
         };
         app.maybe_push_child_column();

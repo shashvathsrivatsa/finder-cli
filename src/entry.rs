@@ -12,58 +12,54 @@ pub struct Entry {
     pub is_executable: bool,
 }
 
-pub fn icon_for_entry(entry: &Entry) -> (&'static str, Color) {
-    // All icons use explicit \u{XXXX} Nerd Font (v2) codepoints
-    const FOLDER:    &str = "\u{F07B}";
-    const FILE:      &str = "\u{F15B}";
-    const RUST:      &str = "\u{E7A8}";
-    const JS:        &str = "\u{E74E}";
-    const TS:        &str = "\u{E628}";
-    const JSON:      &str = "\u{E60B}";
-    const HTML:      &str = "\u{E736}";
-    const CSS:       &str = "\u{E749}";
-    const SCSS:      &str = "\u{E603}";
-    const PYTHON:    &str = "\u{E606}";
-    const GO:        &str = "\u{E627}";
-    const C:         &str = "\u{E61E}";
-    const CPP:       &str = "\u{E61D}";
-    const JAVA:      &str = "\u{E738}";
-    const RUBY:      &str = "\u{E21E}";
-    const SHELL:     &str = "\u{F489}";
-    const MARKDOWN:  &str = "\u{E609}";
-    const TOML:      &str = "\u{E6B2}";
-    const YAML:      &str = "\u{E60A}";
-    const SQL:       &str = "\u{F1C0}";
-    const IMAGE:     &str = "\u{F1C5}";
-    const VIDEO:     &str = "\u{F03D}";
-    const AUDIO:     &str = "\u{F001}";
-    const PDF:       &str = "\u{F1C1}";
-    const ARCHIVE:   &str = "\u{F1C6}";
-    const LOCK:      &str = "\u{F023}";
-    const COG:       &str = "\u{F013}";
-    const GIT:       &str = "\u{E702}";
-    const DOCKER:    &str = "\u{E7B0}";
-    const NODE:      &str = "\u{E718}";
-    const TEXT:      &str = "\u{F0F6}";
-    const LEGAL:     &str = "\u{F0E3}";
-    const BINARY:    &str = "\u{F471}";
-    const LIB:       &str = "\u{F1B2}";
-    const RUN:       &str = "\u{F0E7}";
-    const SWIFT:     &str = "\u{E755}";
-    const KOTLIN:    &str = "\u{E634}";
-    const LUA:       &str = "\u{E620}";
-    const VIM:       &str = "\u{E62B}";
-    const NIX:       &str = "\u{F313}";
-    const TERRAFORM: &str = "\u{E69A}";
-    const FONT:      &str = "\u{F031}";
-    const KEY:       &str = "\u{F805}";
-    const CSV:       &str = "\u{F1C3}";
+// All icons use explicit \u{XXXX} Nerd Font (v2) codepoints
+const FOLDER:    &str = "\u{F07B}";
+const FILE:      &str = "\u{F15B}";
+const RUST:      &str = "\u{E7A8}";
+const JS:        &str = "\u{E74E}";
+const TS:        &str = "\u{E628}";
+const JSON:      &str = "\u{E60B}";
+const HTML:      &str = "\u{E736}";
+const CSS:       &str = "\u{E749}";
+const SCSS:      &str = "\u{E603}";
+const PYTHON:    &str = "\u{E606}";
+const GO:        &str = "\u{E627}";
+const C:         &str = "\u{E61E}";
+const CPP:       &str = "\u{E61D}";
+const JAVA:      &str = "\u{E738}";
+const RUBY:      &str = "\u{E21E}";
+const SHELL:     &str = "\u{F489}";
+const MARKDOWN:  &str = "\u{E609}";
+const TOML:      &str = "\u{E6B2}";
+const YAML:      &str = "\u{E60A}";
+const SQL:       &str = "\u{F1C0}";
+const IMAGE:     &str = "\u{F1C5}";
+const VIDEO:     &str = "\u{F03D}";
+const AUDIO:     &str = "\u{F001}";
+const PDF:       &str = "\u{F1C1}";
+const ARCHIVE:   &str = "\u{F1C6}";
+const LOCK:      &str = "\u{F023}";
+const COG:       &str = "\u{F013}";
+const GIT:       &str = "\u{E702}";
+const DOCKER:    &str = "\u{E7B0}";
+const NODE:      &str = "\u{E718}";
+const TEXT:      &str = "\u{F0F6}";
+const LEGAL:     &str = "\u{F0E3}";
+const BINARY:    &str = "\u{F471}";
+const LIB:       &str = "\u{F1B2}";
+const RUN:       &str = "\u{F0E7}";
+const SWIFT:     &str = "\u{E755}";
+const KOTLIN:    &str = "\u{E634}";
+const LUA:       &str = "\u{E620}";
+const VIM:       &str = "\u{E62B}";
+const NIX:       &str = "\u{F313}";
+const TERRAFORM: &str = "\u{E69A}";
+const FONT:      &str = "\u{F031}";
+const KEY:       &str = "\u{F805}";
+const CSV:       &str = "\u{F1C3}";
 
-    if entry.is_dir {
-        return (FOLDER, Color::Rgb(97, 175, 239));
-    }
-
-    match entry.name.to_lowercase().as_str() {
+pub fn icon_for_name(name: &str) -> (&'static str, Color) {
+    match name.to_lowercase().as_str() {
         "cargo.toml"                                       => return (RUST,   Color::Rgb(222, 165, 132)),
         "cargo.lock"                                       => return (LOCK,   Color::Rgb(183, 183, 183)),
         "package.json" | "package-lock.json"               => return (NODE,   Color::Rgb(203, 120,  50)),
@@ -75,7 +71,7 @@ pub fn icon_for_entry(entry: &Entry) -> (&'static str, Color) {
         _ => {}
     }
 
-    let ext = entry.path.extension().and_then(|s| s.to_str()).unwrap_or("");
+    let ext = std::path::Path::new(name).extension().and_then(|s| s.to_str()).unwrap_or("");
     match ext {
         "rs"                              => (RUST,      Color::Rgb(222, 165, 132)),
         "js" | "mjs" | "cjs"             => (JS,        Color::Rgb(240, 214,  83)),
@@ -127,9 +123,19 @@ pub fn icon_for_entry(entry: &Entry) -> (&'static str, Color) {
         "so" | "dylib" | "dll" | "a"      => (LIB,       Color::Rgb(180, 100,  60)),
         "wasm"                            => (BINARY,    Color::Rgb(100, 150, 200)),
         "pdb" | "map"                     => (BINARY,    Color::Rgb(120, 120, 120)),
-        _ if entry.is_executable         => (RUN,       Color::Rgb( 80, 220, 120)),
         _                                 => (FILE,      Color::Rgb(180, 180, 180)),
     }
+}
+
+pub fn icon_for_entry(entry: &Entry) -> (&'static str, Color) {
+    if entry.is_dir {
+        return (FOLDER, Color::Rgb(97, 175, 239));
+    }
+    let (icon, color) = icon_for_name(&entry.name);
+    if icon == FILE && entry.is_executable {
+        return (RUN, Color::Rgb(80, 220, 120));
+    }
+    (icon, color)
 }
 
 pub fn group_label(ext: &str) -> &'static str {

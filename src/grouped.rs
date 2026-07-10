@@ -6,7 +6,7 @@ use ratatui::{
     widgets::{ListItem, ListState},
 };
 
-use crate::entry::{Entry, group_label, icon_for_entry};
+use crate::entry::{Entry, group_label, icon_for_entry, icon_for_name};
 use crate::rename::RenameState;
 
 pub fn jump_label(row: usize) -> String {
@@ -125,8 +125,12 @@ impl GroupedEntries {
 
             for &ei in idxs {
                 let e = &self.entries[ei];
-                let (icon, icon_color) = icon_for_entry(e);
                 let is_selected = selected_entry_path.is_some_and(|p| p == e.path);
+                let (icon, icon_color) = if is_selected && renaming.is_some() && !e.is_dir {
+                    icon_for_name(&renaming.unwrap().text)
+                } else {
+                    icon_for_entry(e)
+                };
                 let label_str = format!("{:>width$} ", jump_label(row_idx), width = label_width);
 
                 let mut spans = vec![

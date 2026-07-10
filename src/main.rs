@@ -10,13 +10,13 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, DisableFocusChange, EnableFocusChange, Event, KeyCode, KeyEventKind},
+    event::{self, DisableMouseCapture, EnableMouseCapture, DisableFocusChange, EnableFocusChange, Event, KeyCode, KeyEventKind, KeyModifiers},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
 
-use app::{App, qwerty_prefix_offset};
+use app::{App, ClipboardEntry, ClipboardOp, CLIPBOARD_FLASH_MS, qwerty_prefix_offset};
 use rename::{RenameMode, RenameState};
 use ui::render;
 
@@ -37,6 +37,22 @@ fn copy_dir(src: &Path, dst: &Path) -> io::Result<()> {
         let dst_path = dst.join(entry.file_name());
         if entry.file_type()?.is_dir() { copy_dir(&entry.path(), &dst_path)?; }
         else { std::fs::copy(&entry.path(), &dst_path)?; }
+    }
+    Ok(())
+}
+
+fn do_paste(entry: &ClipboardEntry, dst: &Path) -> io::Result<()> {
+    if entry.path == dst { return Ok(()); }
+    if dst.exists() {
+        if dst.is_dir() { std::fs::remove_dir_all(dst)?; }
+        else            { std::fs::remove_file(dst)?; }
+    }
+    match entry.op {
+        ClipboardOp::Cut  => std::fs::rename(&entry.path, dst)?,
+        ClipboardOp::Copy => {
+            if entry.path.is_dir() { copy_dir(&entry.path, dst)?; }
+            else                   { std::fs::copy(&entry.path, dst).map(|_| ())?; }
+        }
     }
     Ok(())
 }
@@ -79,7 +95,10 @@ fn main() -> io::Result<()> {
     loop {
         terminal.draw(|f| render(f, &mut app))?;
 
-        if event::poll(Duration::from_millis(500))? {
+        let flash_active = app.clipboard.as_ref()
+            .is_some_and(|cb| cb.set_at.elapsed().as_millis() < CLIPBOARD_FLASH_MS as u128 + 50);
+        let poll_ms = if flash_active { 50 } else { 500 };
+        if event::poll(Duration::from_millis(poll_ms))? {
             let ev = event::read()?;
             if matches!(ev, Event::FocusGained) { app.focused = true; continue; }
             if matches!(ev, Event::FocusLost)   { app.focused = false; continue; }
@@ -105,6 +124,23 @@ fn main() -> io::Result<()> {
                             app.maybe_push_child_column();
                         }
                         _ => { app.confirming_delete = None; }
+                    }
+                    continue;
+                }
+
+                // Replace confirmation intercepts all keys
+                if app.confirming_replace.is_some() {
+                    match key.code {
+                        KeyCode::Char('y') => {
+                            let (src, dst) = app.confirming_replace.take().unwrap();
+                            if let Some(ref cb) = app.clipboard.clone() {
+                                do_paste(&ClipboardEntry { op: cb.op.clone(), path: src, set_at: cb.set_at }, &dst).ok();
+                                if cb.op == ClipboardOp::Cut { app.clipboard = None; }
+                            }
+                            app.refresh();
+                            app.maybe_push_child_column();
+                        }
+                        _ => { app.confirming_replace = None; }
                     }
                     continue;
                 }
@@ -317,6 +353,45 @@ fn main() -> io::Result<()> {
                             app.renaming = Some(RenameState::new(&e.name));
                         }
                     }
+                    KeyCode::Char('X') => {
+                        app.pending_g = false;
+                        app.pending_prefix = None;
+                        let col = &app.columns[app.active_col];
+                        if let Some(e) = col.grouped.entry_at_row(col.selected_row) {
+                            app.clipboard = Some(ClipboardEntry { op: ClipboardOp::Cut, path: e.path.clone(), set_at: std::time::Instant::now() });
+                        }
+                    }
+                    KeyCode::Char('C') => {
+                        app.pending_g = false;
+                        app.pending_prefix = None;
+                        let col = &app.columns[app.active_col];
+                        if let Some(e) = col.grouped.entry_at_row(col.selected_row) {
+                            app.clipboard = Some(ClipboardEntry { op: ClipboardOp::Copy, path: e.path.clone(), set_at: std::time::Instant::now() });
+                        }
+                    }
+                    KeyCode::Char('V') => {
+                        app.pending_g = false;
+                        app.pending_prefix = None;
+                        if let Some(ref cb) = app.clipboard.clone() {
+                            if let Some(filename) = cb.path.file_name() {
+                                let col = &app.columns[app.active_col];
+                                let dest_dir = col.selected_entry()
+                                    .filter(|e| e.is_dir)
+                                    .map(|e| e.path.clone())
+                                    .unwrap_or_else(|| col.path.clone());
+                                let dst = dest_dir.join(filename);
+                                if dst.exists() && dst != cb.path {
+                                    app.confirming_replace = Some((cb.path.clone(), dst));
+                                } else {
+                                    let is_cut = cb.op == ClipboardOp::Cut;
+                                    do_paste(cb, &dst).ok();
+                                    if is_cut { app.clipboard = None; }
+                                    app.refresh();
+                                    app.maybe_push_child_column();
+                                }
+                            }
+                        }
+                    }
                     KeyCode::Char('x') => {
                         app.pending_g = false;
                         app.pending_prefix = None;
@@ -337,7 +412,7 @@ fn main() -> io::Result<()> {
                                 .ok();
                         }
                     }
-                    KeyCode::Char('C') => {
+                    KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                         app.pending_g = false;
                         app.pending_prefix = None;
                         let col = &app.columns[app.active_col];
@@ -396,6 +471,42 @@ fn main() -> io::Result<()> {
                             }
                             app.refresh();
                             // Select the new dir in the target column and enter rename mode
+                            let col = &mut app.columns[app.active_col];
+                            if let Some(row) = col.grouped.row_to_entry.iter().position(|&i| {
+                                col.grouped.entries[i].name == placeholder
+                            }) {
+                                col.selected_row = row;
+                                col.sync_list_state();
+                            }
+                            app.renaming = Some(RenameState {
+                                text: String::new(),
+                                cursor: 0,
+                                mode: RenameMode::Insert,
+                                pending: String::new(),
+                            });
+                            app.maybe_push_child_column();
+                        }
+                    }
+                    KeyCode::Char('T') => {
+                        app.pending_g = false;
+                        app.pending_prefix = None;
+                        let col = &app.columns[app.active_col];
+                        let base_path = col.selected_entry()
+                            .filter(|e| e.is_dir)
+                            .map(|e| e.path.clone())
+                            .unwrap_or_else(|| col.path.clone());
+                        let placeholder = (0u32..).map(|i| {
+                            if i == 0 { "untitled".to_string() } else { format!("untitled {}", i) }
+                        }).find(|name| !base_path.join(name).exists()).unwrap();
+                        let new_file = base_path.join(&placeholder);
+                        if std::fs::File::create(&new_file).is_ok() {
+                            let selected_is_dir = app.columns[app.active_col]
+                                .selected_entry().is_some_and(|e| e.is_dir);
+                            if selected_is_dir {
+                                app.maybe_push_child_column();
+                                app.move_right();
+                            }
+                            app.refresh();
                             let col = &mut app.columns[app.active_col];
                             if let Some(row) = col.grouped.row_to_entry.iter().position(|&i| {
                                 col.grouped.entries[i].name == placeholder
