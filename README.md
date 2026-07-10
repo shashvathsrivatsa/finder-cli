@@ -1,8 +1,8 @@
-# dir-viewer
+# Finder CLI
 
-# Keybinds
+## Keybinds
 
-## Navigation
+### Navigation
 | Key | Action |
 |-----|--------|
 | `h` / `←` | Move left |
@@ -16,7 +16,7 @@
 | `=` | Move right (alias) |
 | `n` | Reset to current directory root |
 
-## File Actions
+### File Actions
 | Key | Action |
 |-----|--------|
 | `Enter` | cd into folder / open file in nvim |
@@ -25,7 +25,7 @@
 | `f` | Reveal in Finder |
 | `C` | Copy path to clipboard |
 
-## File Management
+### File Management
 | Key | Action |
 |-----|--------|
 | `d` | New directory (inside selected folder) |
@@ -33,7 +33,7 @@
 | `K` | Duplicate |
 | `D` | Delete with confirmation |
 
-## Other
+### Other
 | Key | Action |
 |-----|--------|
 | `q` / `Esc` | Quit |
