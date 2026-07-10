@@ -219,33 +219,40 @@ impl GroupedEntries {
     fn list_items(&self, selected_entry_path: Option<&Path>) -> (Vec<ListItem<'static>>, usize) {
         let mut items: Vec<ListItem<'static>> = Vec::new();
         let mut selected_item_index: usize = 0;
-        let mut running = 0usize;
+        let label_width = if self.row_count <= 10 { 1usize } else { 2 };
+        let mut row_idx = 0usize; // 0-based
 
         for (group_idx, (label, idxs)) in self.groups.iter().enumerate() {
             // Blank spacer before every group except the first
             if group_idx > 0 {
                 items.push(ListItem::new(Line::from("")));
             }
-            // Group header
+            // Group header (indented past the jump-label gutter)
+            let gutter = " ".repeat(label_width + 1);
             items.push(
-                ListItem::new(Line::from(vec![Span::styled(
-                    label.clone(),
-                    Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD),
-                )]))
+                ListItem::new(Line::from(vec![
+                    Span::raw(gutter),
+                    Span::styled(
+                        label.clone(),
+                        Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD),
+                    ),
+                ]))
                 .style(Style::default()),
             );
 
             for &ei in idxs {
                 let e = &self.entries[ei];
                 let (icon, icon_color) = icon_for_entry(e);
-                let label = if e.is_dir {
+                let entry_label = if e.is_dir {
                     format!("{}/", e.name)
                 } else {
                     e.name.clone()
                 };
+                let label_str = format!("{:>width$} ", jump_label(row_idx), width = label_width);
                 let spans = vec![
+                    Span::styled(label_str, Style::default().fg(Color::Rgb(80, 80, 80))),
                     Span::styled(format!("{} ", icon), Style::default().fg(icon_color)),
-                    Span::raw(label),
+                    Span::raw(entry_label),
                 ];
 
                 if selected_entry_path.is_some_and(|p| p == e.path) {
@@ -253,8 +260,7 @@ impl GroupedEntries {
                 }
 
                 items.push(ListItem::new(Line::from(spans)));
-                running += 1;
-                let _ = running;
+                row_idx += 1;
             }
         }
 
@@ -279,6 +285,26 @@ impl GroupedEntries {
             list_idx += idxs.len();
         }
         list_idx
+    }
+
+    #[allow(dead_code)]
+    fn entry_row_for_list_index(&self, list_idx: usize) -> Option<usize> {
+        let mut idx = 0usize;
+        let mut row = 0usize;
+        for (gi, (_, idxs)) in self.groups.iter().enumerate() {
+            if gi > 0 {
+                if idx == list_idx { return None; }
+                idx += 1;
+            }
+            if idx == list_idx { return None; }
+            idx += 1;
+            for _ in 0..idxs.len() {
+                if idx == list_idx { return Some(row); }
+                idx += 1;
+                row += 1;
+            }
+        }
+        None
     }
 }
 
@@ -335,12 +361,31 @@ struct App {
     columns: Vec<Column>,
     active_col: usize,
     pending_g: bool,
+    pending_prefix: Option<usize>, // row offset from a qwerty prefix key
+}
+
+fn qwerty_prefix_offset(c: char) -> Option<usize> {
+    "poiuytrew".find(c).map(|i| (i + 1) * 10)
+}
+
+fn jump_label(row: usize) -> String {
+    let n = row + 1;
+    if n <= 10 {
+        let d = if n == 10 { '0' } else { char::from_digit(n as u32, 10).unwrap() };
+        d.to_string()
+    } else {
+        let off = n - 11;
+        let prefix = "poiuytrew".chars().nth(off / 10).unwrap_or('?');
+        let digit_val = off % 10 + 1;
+        let d = if digit_val == 10 { '0' } else { char::from_digit(digit_val as u32, 10).unwrap() };
+        format!("{}{}", prefix, d)
+    }
 }
 
 impl App {
     fn new(start: PathBuf) -> Self {
         let col = Column::new(start);
-        let mut app = App { columns: vec![col], active_col: 0, pending_g: false };
+        let mut app = App { columns: vec![col], active_col: 0, pending_g: false, pending_prefix: None };
         // Expand into first selected dir if any
         app.maybe_push_child_column();
         app
@@ -492,6 +537,15 @@ fn render(frame: &mut Frame, app: &mut App) {
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
+fn open_in_nvim(path: &Path) -> io::Result<()> {
+    disable_raw_mode()?;
+    execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture)?;
+    std::process::Command::new("nvim").arg(path).status()?;
+    enable_raw_mode()?;
+    execute!(io::stdout(), EnterAlternateScreen, EnableMouseCapture)?;
+    Ok(())
+}
+
 fn main() -> io::Result<()> {
     let start = std::env::args()
         .nth(1)
@@ -515,7 +569,7 @@ fn main() -> io::Result<()> {
                     continue;
                 }
                 match key.code {
-                    KeyCode::Char('q') | KeyCode::Esc => break,
+                    KeyCode::Esc | KeyCode::Char('q') => break,
                     KeyCode::Up | KeyCode::Char('k') => { app.pending_g = false; app.move_up(); }
                     KeyCode::Down | KeyCode::Char('j') => { app.pending_g = false; app.move_down(); }
                     KeyCode::Right | KeyCode::Char('l') | KeyCode::Char('=') => { app.pending_g = false; app.move_right(); }
@@ -535,6 +589,7 @@ fn main() -> io::Result<()> {
                         app.maybe_push_child_column();
                     }
                     KeyCode::Char('g') => {
+                        app.pending_prefix = None;
                         if app.pending_g {
                             app.pending_g = false;
                             let col = &mut app.columns[app.active_col];
@@ -547,7 +602,9 @@ fn main() -> io::Result<()> {
                     }
                     KeyCode::Char(c @ '0'..='9') => {
                         app.pending_g = false;
-                        let n = if c == '0' { 9 } else { c as usize - '1' as usize };
+                        let digit = if c == '0' { 10 } else { c as usize - '0' as usize };
+                        let offset = app.pending_prefix.take().unwrap_or(0);
+                        let n = offset + digit - 1; // 0-indexed
                         let col = &mut app.columns[app.active_col];
                         if n < col.grouped.row_count {
                             col.selected_row = n;
@@ -555,7 +612,25 @@ fn main() -> io::Result<()> {
                         }
                         app.maybe_push_child_column();
                     }
-                    _ => { app.pending_g = false; }
+                    KeyCode::Enter | KeyCode::Char(' ') => {
+                        app.pending_g = false;
+                        app.pending_prefix = None;
+                        let col = &app.columns[app.active_col];
+                        if let Some(e) = col.grouped.entry_at_row(col.selected_row) {
+                            let (path, is_dir) = (e.path.clone(), e.is_dir);
+                            if is_dir {
+                                app.move_right();
+                            } else {
+                                open_in_nvim(&path)?;
+                                terminal.clear()?;
+                            }
+                        }
+                    }
+                    KeyCode::Char(c) if qwerty_prefix_offset(c).is_some() => {
+                        app.pending_g = false;
+                        app.pending_prefix = qwerty_prefix_offset(c);
+                    }
+                    _ => { app.pending_g = false; app.pending_prefix = None; }
                 }
             }
         } else {
