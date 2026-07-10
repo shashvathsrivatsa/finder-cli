@@ -78,6 +78,7 @@ fn main() -> io::Result<()> {
                             let col = &mut app.columns[app.active_col];
                             if col.selected_row > 0 { col.selected_row -= 1; }
                             app.refresh();
+                            app.maybe_push_child_column();
                         }
                         _ => { app.confirming_delete = None; }
                     }

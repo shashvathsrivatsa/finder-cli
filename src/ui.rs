@@ -10,21 +10,16 @@ use crate::app::App;
 
 pub fn render(frame: &mut Frame, app: &mut App) {
     let full_area = frame.area();
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(0), Constraint::Length(1)])
+        .split(full_area);
+    let area = chunks[0];
+    let status_area = chunks[1];
 
-    let (area, confirm_area) = if app.confirming_delete.is_some() {
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(0), Constraint::Length(1)])
-            .split(full_area);
-        (chunks[0], Some(chunks[1]))
-    } else {
-        (full_area, None)
-    };
-
-    if let (Some(path), Some(bar)) = (&app.confirming_delete, confirm_area) {
+    if let Some(path) = &app.confirming_delete {
         let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let kind = if path.is_dir() { "directory" } else { "file" };
-        let block = Block::new().style(Style::default().bg(Color::Black));
         let text = Line::from(vec![
             Span::styled(format!("Delete {} ", kind), Style::default().fg(Color::Rgb(220, 50, 50))),
             Span::styled(format!("\"{}\"", name), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
@@ -34,7 +29,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             Span::styled("[n]", Style::default().fg(Color::Rgb(220, 50, 50)).add_modifier(Modifier::BOLD)),
             Span::styled("o", Style::default().fg(Color::DarkGray)),
         ]);
-        frame.render_widget(Paragraph::new(text).block(block), bar);
+        frame.render_widget(Paragraph::new(text), status_area);
     }
 
     let num_cols = app.columns.len();
