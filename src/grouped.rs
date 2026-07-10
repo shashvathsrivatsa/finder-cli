@@ -71,7 +71,7 @@ impl GroupedEntries {
 
         let mut groups: Vec<(String, Vec<usize>)> = Vec::new();
         for (label, idxs) in [
-            ("Folders",     folder_indices),
+            ("",            folder_indices),
             ("Executables", exec_indices),
             ("Developer",   dev_indices),
             ("Config",      config_indices),
@@ -108,20 +108,24 @@ impl GroupedEntries {
         let mut row_idx = 0usize;
 
         for (group_idx, (label, idxs)) in self.groups.iter().enumerate() {
-            if group_idx > 0 {
+            if !label.is_empty() {
+                if group_idx > 0 {
+                    items.push(ListItem::new(Line::from("")));
+                }
+                let gutter = " ".repeat(label_width + 1);
+                items.push(
+                    ListItem::new(Line::from(vec![
+                        Span::raw(gutter),
+                        Span::styled(
+                            label.clone(),
+                            Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD),
+                        ),
+                    ]))
+                    .style(Style::default()),
+                );
+            } else if group_idx > 0 {
                 items.push(ListItem::new(Line::from("")));
             }
-            let gutter = " ".repeat(label_width + 1);
-            items.push(
-                ListItem::new(Line::from(vec![
-                    Span::raw(gutter),
-                    Span::styled(
-                        label.clone(),
-                        Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD),
-                    ),
-                ]))
-                .style(Style::default()),
-            );
 
             for &ei in idxs {
                 let e = &self.entries[ei];
@@ -168,9 +172,9 @@ impl GroupedEntries {
     pub fn list_index_for_row(&self, row: usize) -> usize {
         let mut list_idx = 0usize;
         let mut remaining = row;
-        for (gi, (_, idxs)) in self.groups.iter().enumerate() {
-            if gi > 0 { list_idx += 1; }
-            list_idx += 1;
+        for (gi, (label, idxs)) in self.groups.iter().enumerate() {
+            if gi > 0 { list_idx += 1; } // spacer
+            if !label.is_empty() { list_idx += 1; } // header
             if remaining < idxs.len() {
                 return list_idx + remaining;
             }
@@ -184,13 +188,15 @@ impl GroupedEntries {
     pub fn entry_row_for_list_index(&self, list_idx: usize) -> Option<usize> {
         let mut idx = 0usize;
         let mut row = 0usize;
-        for (gi, (_, idxs)) in self.groups.iter().enumerate() {
+        for (gi, (label, idxs)) in self.groups.iter().enumerate() {
             if gi > 0 {
                 if idx == list_idx { return None; }
                 idx += 1;
             }
-            if idx == list_idx { return None; }
-            idx += 1;
+            if !label.is_empty() {
+                if idx == list_idx { return None; }
+                idx += 1;
+            }
             for _ in 0..idxs.len() {
                 if idx == list_idx { return Some(row); }
                 idx += 1;

@@ -170,9 +170,6 @@ pub fn read_dir_entries(path: &Path) -> Vec<Entry> {
         .filter_map(|e| {
             let p = e.path();
             let name = p.file_name()?.to_string_lossy().into_owned();
-            if name.starts_with('.') {
-                return None;
-            }
             let is_dir = p.is_dir();
             let is_executable = !is_dir
                 && p.metadata()
