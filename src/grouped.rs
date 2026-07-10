@@ -50,8 +50,6 @@ impl GroupedEntries {
         for (i, e) in entries.iter().enumerate() {
             if e.is_dir {
                 folder_indices.push(i);
-            } else if e.is_executable {
-                exec_indices.push(i);
             } else {
                 let ext = e.path.extension().and_then(|s| s.to_str()).unwrap_or("");
                 match group_label(ext) {
@@ -65,6 +63,7 @@ impl GroupedEntries {
                     "Documents" => doc_indices.push(i),
                     "Fonts"     => font_indices.push(i),
                     "Security"  => security_indices.push(i),
+                    _ if e.is_executable => exec_indices.push(i),
                     _           => other_indices.push(i),
                 }
             }

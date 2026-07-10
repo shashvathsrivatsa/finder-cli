@@ -63,10 +63,6 @@ pub fn icon_for_entry(entry: &Entry) -> (&'static str, Color) {
         return (FOLDER, Color::Rgb(97, 175, 239));
     }
 
-    if entry.is_executable {
-        return (RUN, Color::Rgb(80, 220, 120));
-    }
-
     match entry.name.to_lowercase().as_str() {
         "cargo.toml"                                       => return (RUST,   Color::Rgb(222, 165, 132)),
         "cargo.lock"                                       => return (LOCK,   Color::Rgb(183, 183, 183)),
@@ -131,6 +127,7 @@ pub fn icon_for_entry(entry: &Entry) -> (&'static str, Color) {
         "so" | "dylib" | "dll" | "a"      => (LIB,       Color::Rgb(180, 100,  60)),
         "wasm"                            => (BINARY,    Color::Rgb(100, 150, 200)),
         "pdb" | "map"                     => (BINARY,    Color::Rgb(120, 120, 120)),
+        _ if entry.is_executable         => (RUN,       Color::Rgb( 80, 220, 120)),
         _                                 => (FILE,      Color::Rgb(180, 180, 180)),
     }
 }

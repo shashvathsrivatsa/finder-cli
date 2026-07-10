@@ -17,6 +17,7 @@ pub struct App {
     pub cd_target: Option<PathBuf>,
     pub renaming: Option<RenameState>,
     pub confirming_delete: Option<PathBuf>,
+    pub focused: bool,
 }
 
 impl App {
@@ -30,6 +31,7 @@ impl App {
             cd_target: None,
             renaming: None,
             confirming_delete: None,
+            focused: true,
         };
         app.maybe_push_child_column();
         app

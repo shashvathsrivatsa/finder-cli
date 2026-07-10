@@ -76,9 +76,11 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         let (items, _) = col.grouped.list_items(selected_path.as_deref(), renaming);
 
         let highlight_style = if is_active && app.renaming.is_some() {
-            Style::default() // cursor span handles its own highlight; don't let row bg override it
-        } else if is_active {
+            Style::default()
+        } else if is_active && app.focused {
             Style::default().bg(Color::Rgb(0, 92, 197)).add_modifier(Modifier::BOLD)
+        } else if is_active {
+            Style::default().bg(Color::Rgb(60, 60, 60))
         } else {
             Style::default().bg(Color::Rgb(60, 60, 60))
         };

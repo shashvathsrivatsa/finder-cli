@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind},
+    event::{self, DisableMouseCapture, EnableMouseCapture, DisableFocusChange, EnableFocusChange, Event, KeyCode, KeyEventKind},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -58,7 +58,7 @@ fn open_in_nvim(path: &Path) -> io::Result<()> {
         .stderr(tty_err)
         .status()?;
     enable_raw_mode()?;
-    execute!(open_tty()?, EnterAlternateScreen, EnableMouseCapture)?;
+    execute!(open_tty()?, EnterAlternateScreen, EnableMouseCapture, EnableFocusChange)?;
     Ok(())
 }
 
@@ -70,7 +70,7 @@ fn main() -> io::Result<()> {
 
     enable_raw_mode()?;
     let mut tty = open_tty()?;
-    execute!(tty, EnterAlternateScreen, EnableMouseCapture)?;
+    execute!(tty, EnterAlternateScreen, EnableMouseCapture, EnableFocusChange)?;
     let backend = CrosstermBackend::new(tty);
     let mut terminal = Terminal::new(backend)?;
 
@@ -80,7 +80,10 @@ fn main() -> io::Result<()> {
         terminal.draw(|f| render(f, &mut app))?;
 
         if event::poll(Duration::from_millis(500))? {
-            if let Event::Key(key) = event::read()? {
+            let ev = event::read()?;
+            if matches!(ev, Event::FocusGained) { app.focused = true; continue; }
+            if matches!(ev, Event::FocusLost)   { app.focused = false; continue; }
+            if let Event::Key(key) = ev {
                 if key.kind != KeyEventKind::Press {
                     continue;
                 }
@@ -425,7 +428,7 @@ fn main() -> io::Result<()> {
     }
 
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture, DisableFocusChange)?;
     terminal.show_cursor()?;
     if let Some(path) = app.cd_target {
         println!("{}", path.display());
