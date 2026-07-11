@@ -39,7 +39,6 @@ pub struct App {
     pub renaming: Option<RenameState>,
     pub confirming_delete: Option<PathBuf>,
     pub clipboard: Option<ClipboardEntry>,
-    pub confirming_replace: Option<(PathBuf, PathBuf)>, // (src, dst)
     pub focused: bool,
     pub linked_pane: Option<PaneInfo>,
     pub pane_picker: Option<(Vec<PaneInfo>, usize)>, // (panes, selected_idx)
@@ -57,7 +56,6 @@ impl App {
             renaming: None,
             confirming_delete: None,
             clipboard: None,
-            confirming_replace: None,
             focused: true,
             linked_pane: None,
             pane_picker: None,

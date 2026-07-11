@@ -78,12 +78,29 @@ fn open_in_linked_pane(pane_id: &str, path: &Path) {
         .status();
 }
 
+fn unique_dest(dir: &Path, filename: &std::ffi::OsStr, src: &Path) -> PathBuf {
+    let candidate = dir.join(filename);
+    if !candidate.exists() || candidate == src {
+        return candidate;
+    }
+    let name = Path::new(filename);
+    let stem = name.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+    let ext = name.extension().and_then(|s| s.to_str());
+    let mut i = 0usize;
+    loop {
+        let new_name = if i == 0 {
+            if let Some(e) = ext { format!("{} copy.{}", stem, e) } else { format!("{} copy", stem) }
+        } else {
+            if let Some(e) = ext { format!("{} copy {}.{}", stem, i + 1, e) } else { format!("{} copy {}", stem, i + 1) }
+        };
+        let candidate = dir.join(&new_name);
+        if !candidate.exists() { return candidate; }
+        i += 1;
+    }
+}
+
 fn do_paste(entry: &ClipboardEntry, dst: &Path) -> io::Result<()> {
     if entry.path == dst { return Ok(()); }
-    if dst.exists() {
-        if dst.is_dir() { std::fs::remove_dir_all(dst)?; }
-        else            { std::fs::remove_file(dst)?; }
-    }
     match entry.op {
         ClipboardOp::Cut  => std::fs::rename(&entry.path, dst)?,
         ClipboardOp::Copy => {
@@ -183,23 +200,6 @@ fn main() -> io::Result<()> {
                             app.pane_picker = None;
                         }
                         _ => {}
-                    }
-                    continue;
-                }
-
-                // Replace confirmation intercepts all keys
-                if app.confirming_replace.is_some() {
-                    match key.code {
-                        KeyCode::Char('y') => {
-                            let (src, dst) = app.confirming_replace.take().unwrap();
-                            if let Some(ref cb) = app.clipboard.clone() {
-                                do_paste(&ClipboardEntry { op: cb.op.clone(), path: src, set_at: cb.set_at }, &dst).ok();
-                                if cb.op == ClipboardOp::Cut { app.clipboard = None; }
-                            }
-                            app.refresh();
-                            app.maybe_push_child_column();
-                        }
-                        _ => { app.confirming_replace = None; }
                     }
                     continue;
                 }
@@ -475,16 +475,12 @@ fn main() -> io::Result<()> {
                                     .filter(|e| e.is_dir)
                                     .map(|e| e.path.clone())
                                     .unwrap_or_else(|| col.path.clone());
-                                let dst = dest_dir.join(filename);
-                                if dst.exists() && dst != cb.path {
-                                    app.confirming_replace = Some((cb.path.clone(), dst));
-                                } else {
-                                    let is_cut = cb.op == ClipboardOp::Cut;
-                                    do_paste(cb, &dst).ok();
-                                    if is_cut { app.clipboard = None; }
-                                    app.refresh();
-                                    app.maybe_push_child_column();
-                                }
+                                let dst = unique_dest(&dest_dir, filename, &cb.path);
+                                let is_cut = cb.op == ClipboardOp::Cut;
+                                do_paste(cb, &dst).ok();
+                                if is_cut { app.clipboard = None; }
+                                app.refresh();
+                                app.maybe_push_child_column();
                             }
                         }
                     }

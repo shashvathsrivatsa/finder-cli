@@ -36,17 +36,6 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             Span::styled("[n]", Style::default().fg(Color::Rgb(220, 50, 50)).add_modifier(Modifier::BOLD)),
             Span::styled("o", Style::default().fg(Color::DarkGray)),
         ])
-    } else if let Some((_, dst)) = &app.confirming_replace {
-        let name = dst.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-        Some(vec![
-            Span::styled("Replace ", Style::default().fg(Color::Rgb(220, 140, 50))),
-            Span::styled(format!("\"{}\"", name), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
-            Span::styled("?  ", Style::default().fg(Color::Rgb(220, 140, 50))),
-            Span::styled("[y]", Style::default().fg(Color::Rgb(80, 200, 120)).add_modifier(Modifier::BOLD)),
-            Span::styled("es  ", Style::default().fg(Color::DarkGray)),
-            Span::styled("[n]", Style::default().fg(Color::Rgb(220, 50, 50)).add_modifier(Modifier::BOLD)),
-            Span::styled("o", Style::default().fg(Color::DarkGray)),
-        ])
     } else if let Some(cb) = &app.clipboard {
         if cb.set_at.elapsed().as_millis() < CLIPBOARD_FLASH_MS as u128 {
             let name = cb.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
