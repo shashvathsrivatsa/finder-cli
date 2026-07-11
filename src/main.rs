@@ -76,6 +76,9 @@ fn open_in_linked_pane(pane_id: &str, path: &Path) {
     let _ = std::process::Command::new("tmux")
         .args(["send-keys", "-t", pane_id, &format!(":e {}\r", path_str)])
         .status();
+    let _ = std::process::Command::new("tmux")
+        .args(["select-pane", "-t", pane_id])
+        .status();
 }
 
 fn unique_dest(dir: &Path, filename: &std::ffi::OsStr, src: &Path) -> PathBuf {
