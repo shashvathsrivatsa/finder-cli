@@ -57,6 +57,7 @@ const TERRAFORM: &str = "\u{E69A}";
 const FONT:      &str = "\u{F031}";
 const KEY:       &str = "\u{F805}";
 const CSV:       &str = "\u{F1C3}";
+const NETWORK:   &str = "\u{F0AC}";
 
 pub fn icon_for_name(name: &str) -> (&'static str, Color) {
     match name.to_lowercase().as_str() {
@@ -101,6 +102,7 @@ pub fn icon_for_name(name: &str) -> (&'static str, Color) {
         "ini" | "cfg" | "conf"            => (COG,       Color::Rgb(180, 180, 120)),
         "env"                             => (KEY,       Color::Rgb(240, 214,  83)),
         "sql"                             => (SQL,       Color::Rgb(255, 160, 122)),
+        "har"                             => (NETWORK,   Color::Rgb( 99, 179, 237)),
         "csv"                             => (CSV,       Color::Rgb( 33, 150,  83)),
         "txt"                             => (TEXT,      Color::Rgb(187, 187, 187)),
         "ttf" | "otf" | "woff" | "woff2" => (FONT,      Color::Rgb(200, 160, 255)),
@@ -158,6 +160,7 @@ pub fn group_label(ext: &str) -> &'static str {
         "ttf" | "otf" | "woff" | "woff2"                          => "Fonts",
         "pem" | "key" | "crt" | "cert" | "p12" | "pfx"
         | "ca-bundle"                                              => "Security",
+        "har"                                                      => "Network",
         _                                                          => "Other",
     }
 }
