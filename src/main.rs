@@ -16,7 +16,7 @@ use crossterm::{
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
 
-use app::{App, ClipboardEntry, ClipboardOp, PaneInfo, CLIPBOARD_FLASH_MS, qwerty_prefix_offset};
+use app::{App, ClipboardEntry, ClipboardOp, PaneInfo, CLIPBOARD_FLASH_MS, PAGE_JUMP, qwerty_prefix_offset};
 use rename::{RenameMode, RenameState};
 use ui::render;
 
@@ -353,6 +353,16 @@ fn main() -> io::Result<()> {
                     KeyCode::Down | KeyCode::Char('j') => {
                         app.pending_g = false;
                         app.move_down();
+                    }
+                    KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        app.pending_g = false;
+                        app.columns[app.active_col].move_by(PAGE_JUMP as isize);
+                        app.maybe_push_child_column();
+                    }
+                    KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        app.pending_g = false;
+                        app.columns[app.active_col].move_by(-(PAGE_JUMP as isize));
+                        app.maybe_push_child_column();
                     }
                     KeyCode::Right | KeyCode::Char('l') | KeyCode::Char('=') => {
                         app.pending_g = false;

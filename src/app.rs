@@ -13,6 +13,9 @@ pub fn qwerty_prefix_offset(c: char) -> Option<usize> {
 // Tweak this to change how long the "cut/copy: filename" flash shows
 pub const CLIPBOARD_FLASH_MS: u64 = 200;
 
+// How many rows Ctrl+D / Ctrl+U jump (half-page feel)
+pub const PAGE_JUMP: usize = 5;
+
 #[derive(Clone, PartialEq)]
 pub enum ClipboardOp { Cut, Copy }
 

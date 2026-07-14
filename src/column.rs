@@ -38,6 +38,12 @@ impl Column {
         self.sync_list_state();
     }
 
+    pub fn move_by(&mut self, delta: isize) {
+        let max = self.grouped.row_count.saturating_sub(1);
+        self.selected_row = (self.selected_row as isize + delta).clamp(0, max as isize) as usize;
+        self.sync_list_state();
+    }
+
     pub fn sync_list_state(&mut self) {
         if self.grouped.row_count > 0 {
             let li = self.grouped.list_index_for_row(self.selected_row);
