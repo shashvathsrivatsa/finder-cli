@@ -101,7 +101,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             let heading = Paragraph::new(Line::from(vec![
                 Span::styled(folder_name, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
             ]));
-            frame.render_widget(heading, Rect { x: col_area.x, y: col_area.y, width: col_area.width, height: 1 });
+            frame.render_widget(heading, Rect { x: col_area.x + 1, y: col_area.y, width: col_area.width.saturating_sub(1), height: 1 });
             // List gets everything below the heading, inset by 1 on the left to match bordered layout
             Rect { x: col_area.x + 1, y: col_area.y + 1, width: col_area.width.saturating_sub(1), height: col_area.height.saturating_sub(1) }
         } else {
