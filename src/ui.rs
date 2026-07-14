@@ -95,16 +95,27 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "/".to_string());
 
-        let block = Block::bordered()
-            .title(Span::styled(
-                format!(" {} ", folder_name),
-                Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
-            ))
-            .border_style(Style::default().fg(Color::Rgb(60, 60, 60)))
-            .style(Style::default().bg(Color::Black));
-
-        let inner = block.inner(col_chunks[vi]);
-        frame.render_widget(block, col_chunks[vi]);
+        let inner = if single_pane {
+            let col_area = col_chunks[vi];
+            // Render just the folder name as a top heading line
+            let heading = Paragraph::new(Line::from(vec![
+                Span::styled(folder_name, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            ]));
+            frame.render_widget(heading, Rect { x: col_area.x, y: col_area.y, width: col_area.width, height: 1 });
+            // List gets everything below the heading, inset by 1 on the left to match bordered layout
+            Rect { x: col_area.x + 1, y: col_area.y + 1, width: col_area.width.saturating_sub(1), height: col_area.height.saturating_sub(1) }
+        } else {
+            let block = Block::bordered()
+                .title(Span::styled(
+                    format!(" {} ", folder_name),
+                    Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+                ))
+                .border_style(Style::default().fg(Color::Rgb(60, 60, 60)))
+                .style(Style::default().bg(Color::Black));
+            let inner = block.inner(col_chunks[vi]);
+            frame.render_widget(block, col_chunks[vi]);
+            inner
+        };
 
         let selected_path = col.selected_entry().map(|e| e.path.clone());
         // Only pass rename input for the active column
