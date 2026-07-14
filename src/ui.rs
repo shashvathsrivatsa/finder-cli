@@ -59,21 +59,33 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     let num_cols = app.columns.len();
 
     const COL_WIDTH: u16 = 32;
-    let visible_cols = ((area.width / COL_WIDTH) as usize).max(1).min(num_cols);
+    let fits = area.width / COL_WIDTH;
+    let visible_cols = (fits as usize).max(1).min(num_cols);
+    let single_pane = fits < 2; // not enough room for even two columns
     let preferred_start = app.active_col.saturating_sub(visible_cols.saturating_sub(2));
     let start_col = preferred_start.min(num_cols.saturating_sub(visible_cols));
 
     let visible_count = (num_cols - start_col).min(visible_cols);
-    let mut constraints: Vec<Constraint> =
-        (0..visible_count).map(|_| Constraint::Length(COL_WIDTH)).collect();
-    constraints.push(Constraint::Min(0));
+    let constraints: Vec<Constraint> = if single_pane {
+        // stretch the single active column to fill all available space
+        vec![Constraint::Min(0)]
+    } else {
+        let mut c: Vec<Constraint> = (0..visible_count).map(|_| Constraint::Length(COL_WIDTH)).collect();
+        c.push(Constraint::Min(0));
+        c
+    };
 
     let col_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints(constraints)
         .split(area);
 
-    for (vi, ci) in (start_col..num_cols).enumerate() {
+    let col_range: Box<dyn Iterator<Item = usize>> = if single_pane {
+        Box::new(std::iter::once(app.active_col))
+    } else {
+        Box::new(start_col..start_col + visible_count)
+    };
+    for (vi, ci) in col_range.enumerate() {
         let col = &mut app.columns[ci];
         let is_active = ci == app.active_col;
 
