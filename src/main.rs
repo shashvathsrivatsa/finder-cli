@@ -118,6 +118,31 @@ fn open_tty() -> io::Result<std::fs::File> {
     std::fs::OpenOptions::new().read(true).write(true).open("/dev/tty")
 }
 
+fn load_default_app_exts() -> std::collections::HashSet<String> {
+    let exe_dir = std::env::current_exe().ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()));
+    // Look next to the binary, then next to Cargo.toml (dev), then CWD
+    let candidates = [
+        exe_dir.as_deref().map(|d| d.join("defaults")),
+        Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("defaults")),
+        Some(PathBuf::from("defaults")),
+    ];
+    for path in candidates.into_iter().flatten() {
+        if let Ok(text) = std::fs::read_to_string(&path) {
+            return text.lines()
+                .map(|l| l.trim())
+                .filter(|l| !l.is_empty() && !l.starts_with('#'))
+                .map(|l| l.to_lowercase())
+                .collect();
+        }
+    }
+    std::collections::HashSet::new()
+}
+
+fn open_in_default_app(path: &Path) {
+    let _ = std::process::Command::new("open").arg(path).status();
+}
+
 fn open_in_nvim(path: &Path) -> io::Result<()> {
     disable_raw_mode()?;
     execute!(open_tty()?, LeaveAlternateScreen, DisableMouseCapture)?;
@@ -147,6 +172,7 @@ fn main() -> io::Result<()> {
     let backend = CrosstermBackend::new(tty);
     let mut terminal = Terminal::new(backend)?;
 
+    let default_app_exts = load_default_app_exts();
     let mut app = App::new(start);
 
     loop {
@@ -419,11 +445,16 @@ fn main() -> io::Result<()> {
                             if is_dir {
                                 app.cd_target = Some(path);
                                 break;
-                            } else if let Some(ref pane) = app.linked_pane.clone() {
-                                open_in_linked_pane(&pane.id, &path);
                             } else {
-                                open_in_nvim(&path)?;
-                                terminal.clear()?;
+                                let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
+                                if default_app_exts.contains(&ext) {
+                                    open_in_default_app(&path);
+                                } else if let Some(ref pane) = app.linked_pane.clone() {
+                                    open_in_linked_pane(&pane.id, &path);
+                                } else {
+                                    open_in_nvim(&path)?;
+                                    terminal.clear()?;
+                                }
                             }
                         }
                     }
@@ -435,11 +466,16 @@ fn main() -> io::Result<()> {
                             let (path, is_dir) = (e.path.clone(), e.is_dir);
                             if is_dir {
                                 app.move_right();
-                            } else if let Some(ref pane) = app.linked_pane.clone() {
-                                open_in_linked_pane(&pane.id, &path);
                             } else {
-                                open_in_nvim(&path)?;
-                                terminal.clear()?;
+                                let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
+                                if default_app_exts.contains(&ext) {
+                                    open_in_default_app(&path);
+                                } else if let Some(ref pane) = app.linked_pane.clone() {
+                                    open_in_linked_pane(&pane.id, &path);
+                                } else {
+                                    open_in_nvim(&path)?;
+                                    terminal.clear()?;
+                                }
                             }
                         }
                     }
