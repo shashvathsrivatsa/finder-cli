@@ -175,20 +175,28 @@ fn main() -> io::Result<()> {
     let default_app_exts = load_default_app_exts();
     let mut app = App::new(start);
 
+    let mut last_refresh = std::time::Instant::now();
+    const IDLE_REFRESH_MS: u64 = 5_000;
+    let mut needs_redraw = true;
+
     loop {
-        terminal.draw(|f| render(f, &mut app))?;
+        if needs_redraw {
+            terminal.draw(|f| render(f, &mut app))?;
+            needs_redraw = false;
+        }
 
         let flash_active = app.clipboard.as_ref()
             .is_some_and(|cb| cb.set_at.elapsed().as_millis() < CLIPBOARD_FLASH_MS as u128 + 50);
         let poll_ms = if flash_active { 50 } else { 500 };
         if event::poll(Duration::from_millis(poll_ms))? {
             let ev = event::read()?;
-            if matches!(ev, Event::FocusGained) { app.focused = true; continue; }
-            if matches!(ev, Event::FocusLost)   { app.focused = false; continue; }
+            if matches!(ev, Event::FocusGained) { app.focused = true; needs_redraw = true; continue; }
+            if matches!(ev, Event::FocusLost)   { app.focused = false; needs_redraw = true; continue; }
             if let Event::Key(key) = ev {
                 if key.kind != KeyEventKind::Press {
                     continue;
                 }
+                needs_redraw = true;
 
                 // Delete confirmation intercepts all keys
                 if app.confirming_delete.is_some() {
@@ -677,7 +685,14 @@ fn main() -> io::Result<()> {
                 }
             }
         } else {
-            app.refresh();
+            if flash_active {
+                needs_redraw = true;
+            }
+            if last_refresh.elapsed().as_millis() >= IDLE_REFRESH_MS as u128 {
+                app.refresh();
+                last_refresh = std::time::Instant::now();
+                needs_redraw = true;
+            }
         }
     }
 
