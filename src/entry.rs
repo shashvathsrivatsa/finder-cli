@@ -59,6 +59,7 @@ const KEY:       &str = "\u{F805}";
 const CSV:       &str = "\u{F1C3}";
 const NETWORK:   &str = "\u{F0AC}";
 const JAC:       &str = "\u{2B22}";
+const SHADER:    &str = "\u{F1B2}";
 
 pub fn icon_for_name(name: &str) -> (&'static str, Color) {
     match name.to_lowercase().as_str() {
@@ -86,6 +87,8 @@ pub fn icon_for_name(name: &str) -> (&'static str, Color) {
         "scss" | "sass"                   => (SCSS,      Color::Rgb(204, 102, 153)),
         "py" | "pyi"                       => (PYTHON,    Color::Rgb( 55, 118, 171)),
         "jac"                              => (JAC,       Color::Rgb(234,  90,  40)),
+        "wgsl" | "glsl" | "hlsl" | "frag"
+        | "vert" | "comp"                  => (SHADER,    Color::Rgb(100, 220, 180)),
         "go"                              => (GO,        Color::Rgb(  1, 173, 216)),
         "c" | "h"                         => (C,         Color::Rgb( 85, 170, 255)),
         "cpp" | "cc" | "cxx" | "hpp"     => (CPP,       Color::Rgb(243,  75, 125)),
@@ -148,7 +151,8 @@ pub fn group_label(ext: &str) -> &'static str {
         | "html" | "htm" | "css" | "scss" | "sass"
         | "py" | "pyi" | "go" | "c" | "h" | "cpp" | "cc" | "cxx" | "hpp"
         | "java" | "swift" | "kt" | "kts" | "rb" | "lua" | "sql"
-        | "jac"                                                    => "Developer",
+        | "jac"
+        | "wgsl" | "glsl" | "hlsl" | "frag" | "vert" | "comp"    => "Developer",
         "toml" | "yaml" | "yml" | "json" | "ini" | "cfg" | "conf" | "env"
         | "tf" | "tfvars" | "tfstate" | "gitignore" | "lock"      => "Config",
         "sh" | "bash" | "zsh" | "fish" | "vim" | "nix"            => "Scripts",
