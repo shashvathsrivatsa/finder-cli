@@ -528,10 +528,7 @@ fn main() -> io::Result<()> {
                         if let Some(ref cb) = app.clipboard.clone() {
                             if let Some(filename) = cb.path.file_name() {
                                 let col = &app.columns[app.active_col];
-                                let dest_dir = col.selected_entry()
-                                    .filter(|e| e.is_dir)
-                                    .map(|e| e.path.clone())
-                                    .unwrap_or_else(|| col.path.clone());
+                                let dest_dir = col.path.clone();
                                 let dst = unique_dest(&dest_dir, filename, &cb.path);
                                 let is_cut = cb.op == ClipboardOp::Cut;
                                 do_paste(cb, &dst).ok();
@@ -601,23 +598,13 @@ fn main() -> io::Result<()> {
                     KeyCode::Char('d') => {
                         app.pending_g = false;
                         app.pending_prefix = None;
-                        // Create inside selected dir, or in current column if a file is selected
                         let col = &app.columns[app.active_col];
-                        let base_path = col.selected_entry()
-                            .filter(|e| e.is_dir)
-                            .map(|e| e.path.clone())
-                            .unwrap_or_else(|| col.path.clone());
+                        let base_path = col.path.clone();
                         let placeholder = (0u32..).map(|i| {
                             if i == 0 { "untitled".to_string() } else { format!("untitled {}", i) }
                         }).find(|name| !base_path.join(name).exists()).unwrap();
                         let new_dir = base_path.join(&placeholder);
                         if std::fs::create_dir(&new_dir).is_ok() {
-                            let selected_is_dir = app.columns[app.active_col]
-                                .selected_entry().is_some_and(|e| e.is_dir);
-                            if selected_is_dir {
-                                app.maybe_push_child_column(); // ensure child column exists first
-                                app.move_right();
-                            }
                             app.refresh();
                             // Select the new dir in the target column and enter rename mode
                             let col = &mut app.columns[app.active_col];
@@ -641,21 +628,12 @@ fn main() -> io::Result<()> {
                         app.pending_g = false;
                         app.pending_prefix = None;
                         let col = &app.columns[app.active_col];
-                        let base_path = col.selected_entry()
-                            .filter(|e| e.is_dir)
-                            .map(|e| e.path.clone())
-                            .unwrap_or_else(|| col.path.clone());
+                        let base_path = col.path.clone();
                         let placeholder = (0u32..).map(|i| {
                             if i == 0 { "untitled".to_string() } else { format!("untitled {}", i) }
                         }).find(|name| !base_path.join(name).exists()).unwrap();
                         let new_file = base_path.join(&placeholder);
                         if std::fs::File::create(&new_file).is_ok() {
-                            let selected_is_dir = app.columns[app.active_col]
-                                .selected_entry().is_some_and(|e| e.is_dir);
-                            if selected_is_dir {
-                                app.maybe_push_child_column();
-                                app.move_right();
-                            }
                             app.refresh();
                             let col = &mut app.columns[app.active_col];
                             if let Some(row) = col.grouped.row_to_entry.iter().position(|&i| {
