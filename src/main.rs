@@ -208,10 +208,11 @@ fn main() -> io::Result<()> {
                             } else {
                                 let _ = std::fs::remove_file(&path);
                             }
-                            // Move selection up if we were on the last item
-                            let col = &mut app.columns[app.active_col];
-                            if col.selected_row > 0 { col.selected_row -= 1; }
                             app.refresh();
+                            let col = &mut app.columns[app.active_col];
+                            if col.selected_row >= col.grouped.row_count && col.selected_row > 0 {
+                                col.selected_row -= 1;
+                            }
                             app.maybe_push_child_column();
                         }
                         _ => { app.confirming_delete = None; }
@@ -466,27 +467,6 @@ fn main() -> io::Result<()> {
                             }
                         }
                     }
-                    KeyCode::Char(' ') => {
-                        app.pending_g = false;
-                        app.pending_prefix = None;
-                        let col = &app.columns[app.active_col];
-                        if let Some(e) = col.grouped.entry_at_row(col.selected_row) {
-                            let (path, is_dir) = (e.path.clone(), e.is_dir);
-                            if is_dir {
-                                app.move_right();
-                            } else {
-                                let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
-                                if default_app_exts.contains(&ext) {
-                                    open_in_default_app(&path);
-                                } else if let Some(ref pane) = app.linked_pane.clone() {
-                                    open_in_linked_pane(&pane.id, &path);
-                                } else {
-                                    open_in_nvim(&path)?;
-                                    terminal.clear()?;
-                                }
-                            }
-                        }
-                    }
                     KeyCode::Char('P') => {
                         app.pending_g = false;
                         app.pending_prefix = None;
@@ -576,7 +556,7 @@ fn main() -> io::Result<()> {
                             }
                         }
                     }
-                    KeyCode::Char('K') => {
+                    KeyCode::Char('K') if key.modifiers.contains(KeyModifiers::ALT) => {
                         app.pending_g = false;
                         app.pending_prefix = None;
                         let col = &app.columns[app.active_col];
@@ -584,7 +564,15 @@ fn main() -> io::Result<()> {
                             let dst = copy_dest(&e.path);
                             if e.is_dir { copy_dir(&e.path, &dst).ok(); }
                             else { std::fs::copy(&e.path, &dst).ok(); }
+                            let dst_name = dst.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
                             app.refresh();
+                            let col = &mut app.columns[app.active_col];
+                            if let Some(row) = col.grouped.row_to_entry.iter().position(|&i| {
+                                col.grouped.entries[i].name == dst_name
+                            }) {
+                                col.selected_row = row;
+                                col.sync_list_state();
+                            }
                         }
                     }
                     KeyCode::Char('D') => {
