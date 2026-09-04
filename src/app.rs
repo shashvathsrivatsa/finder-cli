@@ -45,6 +45,7 @@ pub struct App {
     pub focused: bool,
     pub linked_pane: Option<PaneInfo>,
     pub pane_picker: Option<(Vec<PaneInfo>, usize)>, // (panes, selected_idx)
+    pub select_mode: bool,
 }
 
 impl App {
@@ -62,6 +63,7 @@ impl App {
             focused: true,
             linked_pane: None,
             pane_picker: None,
+            select_mode: false,
         };
         app.maybe_push_child_column();
         app

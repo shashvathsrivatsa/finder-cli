@@ -380,7 +380,14 @@ fn main() -> io::Result<()> {
                 }
 
                 match key.code {
-                    KeyCode::Esc | KeyCode::Char('q') => break,
+                    KeyCode::Esc | KeyCode::Char('q') => {
+                        if app.select_mode { app.select_mode = false; } else { break; }
+                    }
+                    KeyCode::Char('S') => {
+                        app.pending_g = false;
+                        app.pending_prefix = None;
+                        app.select_mode = !app.select_mode;
+                    }
                     KeyCode::Up | KeyCode::Char('k') => {
                         app.pending_g = false;
                         app.move_up();

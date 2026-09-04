@@ -24,7 +24,11 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         vec![]
     };
 
-    let status_spans: Option<Vec<Span>> = if let Some(path) = &app.confirming_delete {
+    let status_spans: Option<Vec<Span>> = if app.select_mode {
+        Some(vec![
+            Span::styled("-- SELECT --", Style::default().fg(Color::Rgb(80, 200, 120)).add_modifier(Modifier::BOLD)),
+        ])
+    } else if let Some(path) = &app.confirming_delete {
         let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let kind = if path.is_dir() { "directory" } else { "file" };
         Some(vec![
