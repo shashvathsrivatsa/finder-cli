@@ -166,6 +166,11 @@ fn main() -> io::Result<()> {
         .map(PathBuf::from)
         .unwrap_or_else(|| std::env::current_dir().unwrap());
 
+    let mut shelf_proc = std::process::Command::new("shelf")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn().ok();
+
     enable_raw_mode()?;
     let mut tty = open_tty()?;
     execute!(tty, EnterAlternateScreen, EnableMouseCapture, EnableFocusChange)?;
@@ -616,6 +621,21 @@ fn main() -> io::Result<()> {
                             std::process::Command::new("open").arg(&e.path).spawn().ok();
                         }
                     }
+                    KeyCode::Tab => {
+                        app.pending_g = false;
+                        app.pending_prefix = None;
+                        let col = &app.columns[app.active_col];
+                        let paths: Vec<_> = if !app.selection.is_empty() {
+                            app.selection.iter().cloned().collect()
+                        } else if let Some(e) = col.grouped.entry_at_row(col.selected_row) {
+                            vec![e.path.clone()]
+                        } else { vec![] };
+                        for path in paths {
+                            std::process::Command::new("shelf-add")
+                                .arg(&path)
+                                .spawn().ok();
+                        }
+                    }
                     KeyCode::Char('f') => {
                         app.pending_g = false;
                         app.pending_prefix = None;
@@ -757,6 +777,8 @@ fn main() -> io::Result<()> {
             }
         }
     }
+
+    if let Some(ref mut p) = shelf_proc { p.kill().ok(); }
 
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture, DisableFocusChange)?;
