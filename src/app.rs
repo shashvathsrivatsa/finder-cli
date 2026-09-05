@@ -7,9 +7,6 @@ use crate::entry::read_dir_entries;
 use crate::grouped::GroupedEntries;
 use crate::rename::RenameState;
 
-pub fn qwerty_prefix_offset(c: char) -> Option<usize> {
-    "poiuytrew".find(c).map(|i| (i + 1) * 10)
-}
 
 // Tweak this to change how long the "cut/copy: filename" flash shows
 pub const CLIPBOARD_FLASH_MS: u64 = 200;
@@ -49,6 +46,8 @@ pub struct App {
     pub linked_pane: Option<PaneInfo>,
     pub pane_picker: Option<(Vec<PaneInfo>, usize)>, // (panes, selected_idx)
     pub select_mode: bool,
+    pub pending_digits: usize,
+    pub col_viewport_height: usize,
     pub selection: HashSet<PathBuf>,
     pub selection_anchor: Option<usize>, // row of last space-toggled entry
 }
@@ -70,6 +69,8 @@ impl App {
             linked_pane: None,
             pane_picker: None,
             select_mode: false,
+            pending_digits: 0,
+            col_viewport_height: 0,
             selection: HashSet::new(),
             selection_anchor: None,
         };

@@ -24,11 +24,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         vec![]
     };
 
-    let status_spans: Option<Vec<Span>> = if app.select_mode {
-        Some(vec![
-            Span::styled("-- SELECT --", Style::default().fg(Color::Rgb(80, 200, 120)).add_modifier(Modifier::BOLD)),
-        ])
-    } else if let Some(path) = &app.confirming_delete {
+    let status_spans: Option<Vec<Span>> = if let Some(path) = &app.confirming_delete {
         let multi = app.pending_deletes.len() > 1;
         let (label, name) = if multi {
             ("Delete ".to_string(), format!("{} items", app.pending_deletes.len()))
@@ -46,11 +42,15 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             Span::styled("[n]", Style::default().fg(Color::Rgb(220, 50, 50)).add_modifier(Modifier::BOLD)),
             Span::styled("o", Style::default().fg(Color::DarkGray)),
         ])
+    } else if app.select_mode {
+        Some(vec![
+            Span::styled("-- VISUAL --", Style::default().fg(Color::Rgb(80, 200, 120)).add_modifier(Modifier::BOLD)),
+        ])
     } else if let Some(cb) = &app.clipboard {
         if cb.set_at.elapsed().as_millis() < CLIPBOARD_FLASH_MS as u128 {
             let name = cb.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             let (verb, color) = match cb.op {
-                ClipboardOp::Cut  => ("cut",  Color::Rgb(220, 140, 50)),
+                ClipboardOp::Cut  => ("move", Color::Rgb(220, 140, 50)),
                 ClipboardOp::Copy => ("copy", Color::Rgb(100, 180, 255)),
             };
             Some(vec![
@@ -127,6 +127,9 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             inner
         };
 
+        if is_active {
+            app.col_viewport_height = inner.height as usize;
+        }
         let selected_path = col.selected_entry().map(|e| e.path.clone());
         // Only pass rename input for the active column
         let renaming = if is_active { app.renaming.as_ref() } else { None };

@@ -10,18 +10,12 @@ use ratatui::{
 use crate::entry::{Entry, group_label, icon_for_entry, icon_for_name};
 use crate::rename::RenameState;
 
-pub fn jump_label(row: usize) -> String {
-    let n = row + 1;
-    if n <= 10 {
-        let d = if n == 10 { '0' } else { char::from_digit(n as u32, 10).unwrap() };
-        d.to_string()
-    } else {
-        let off = n - 11;
-        let prefix = "poiuytrew".chars().nth(off / 10).unwrap_or('?');
-        let digit_val = off % 10 + 1;
-        let d = if digit_val == 10 { '0' } else { char::from_digit(digit_val as u32, 10).unwrap() };
-        format!("{}{}", prefix, d)
-    }
+pub fn jump_label(row: usize, width: usize) -> String {
+    format!("{:0>width$}", row + 1, width = width)
+}
+
+pub fn label_width(row_count: usize) -> usize {
+    if row_count == 0 { 1 } else { row_count.to_string().len() }
 }
 
 #[derive(Debug)]
@@ -108,7 +102,7 @@ impl GroupedEntries {
     pub fn list_items(&self, selected_entry_path: Option<&Path>, renaming: Option<&RenameState>, selection: &HashSet<PathBuf>) -> (Vec<ListItem<'static>>, usize) {
         let mut items: Vec<ListItem<'static>> = Vec::new();
         let mut selected_item_index: usize = 0;
-        let label_width = if self.row_count <= 10 { 1usize } else { 2 };
+        let lw = label_width(self.row_count);
         let mut row_idx = 0usize;
 
         for (group_idx, (label, idxs)) in self.groups.iter().enumerate() {
@@ -116,7 +110,7 @@ impl GroupedEntries {
                 if group_idx > 0 {
                     items.push(ListItem::new(Line::from("")));
                 }
-                let gutter = " ".repeat(label_width + 1);
+                let gutter = " ".repeat(lw + 1);
                 items.push(
                     ListItem::new(Line::from(vec![
                         Span::raw(gutter),
@@ -139,10 +133,11 @@ impl GroupedEntries {
                 } else {
                     icon_for_entry(e)
                 };
-                let label_str = format!("{:>width$} ", jump_label(row_idx), width = label_width);
+                let label_str = format!("{} ", jump_label(row_idx, lw));
 
+                let x = 100;
                 let mut spans = vec![
-                    Span::styled(label_str, Style::default().fg(Color::Rgb(80, 80, 80))),
+                    Span::styled(label_str, Style::default().fg(Color::Rgb(x, x, x))),
                 ];
 
                 if is_selected && renaming.is_some() {

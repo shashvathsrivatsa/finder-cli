@@ -16,7 +16,7 @@ use crossterm::{
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
 
-use app::{App, ClipboardEntry, ClipboardOp, PaneInfo, CLIPBOARD_FLASH_MS, PAGE_JUMP, qwerty_prefix_offset};
+use app::{App, ClipboardEntry, ClipboardOp, PaneInfo, CLIPBOARD_FLASH_MS, PAGE_JUMP};
 use rename::{RenameMode, RenameState};
 use ui::render;
 
@@ -81,9 +81,9 @@ fn open_in_linked_pane(pane_id: &str, path: &Path) {
         .status();
 }
 
-fn unique_dest(dir: &Path, filename: &std::ffi::OsStr, src: &Path) -> PathBuf {
+fn unique_dest(dir: &Path, filename: &std::ffi::OsStr, src: &Path, is_move: bool) -> PathBuf {
     let candidate = dir.join(filename);
-    if !candidate.exists() || candidate == src {
+    if !candidate.exists() || (is_move && candidate == src) {
         return candidate;
     }
     let name = Path::new(filename);
@@ -208,7 +208,7 @@ fn main() -> io::Result<()> {
                                 if path.is_dir() { let _ = std::fs::remove_dir_all(path); }
                                 else { let _ = std::fs::remove_file(path); }
                             }
-                            app.selection.clear(); app.selection_anchor = None;
+                            app.selection.clear(); app.selection_anchor = None; app.select_mode = false;
                             app.refresh();
                             let col = &mut app.columns[app.active_col];
                             if col.selected_row >= col.grouped.row_count && col.selected_row > 0 {
@@ -389,7 +389,7 @@ fn main() -> io::Result<()> {
                             break;
                         }
                     }
-                    KeyCode::Char('S') => {
+                    KeyCode::Char('V') => {
                         app.pending_g = false;
                         app.pending_prefix = None;
                         if app.select_mode {
@@ -415,7 +415,7 @@ fn main() -> io::Result<()> {
                             }
                         }
                     }
-                    KeyCode::Char(',') if app.select_mode => {
+                    KeyCode::Char(' ') | KeyCode::Char(',') if app.select_mode => {
                         app.pending_g = false;
                         app.pending_prefix = None;
                         let col = &app.columns[app.active_col];
@@ -449,13 +449,25 @@ fn main() -> io::Result<()> {
                         app.columns[app.active_col].move_by(-(PAGE_JUMP as isize));
                         app.maybe_push_child_column();
                     }
-                    KeyCode::Right | KeyCode::Char('l') | KeyCode::Char('=') => {
+                    KeyCode::Right | KeyCode::Char('l') | KeyCode::Char('=') if !key.modifiers.contains(KeyModifiers::ALT) => {
                         app.pending_g = false;
                         app.move_right();
                     }
-                    KeyCode::Left | KeyCode::Char('h') | KeyCode::Char('-') => {
+                    KeyCode::Left | KeyCode::Char('h') | KeyCode::Char('-') if !key.modifiers.contains(KeyModifiers::ALT) => {
                         app.pending_g = false;
                         app.move_left();
+                    }
+                    KeyCode::Char('=') if key.modifiers.contains(KeyModifiers::ALT) => {
+                        app.pending_g = false;
+                        app.pending_prefix = None;
+                        let vh = app.col_viewport_height;
+                        app.columns[app.active_col].scroll_by(5, vh);
+                    }
+                    KeyCode::Char('-') if key.modifiers.contains(KeyModifiers::ALT) => {
+                        app.pending_g = false;
+                        app.pending_prefix = None;
+                        let vh = app.col_viewport_height;
+                        app.columns[app.active_col].scroll_by(-5, vh);
                     }
                     KeyCode::Char('n') => {
                         app.pending_g = false;
@@ -485,15 +497,22 @@ fn main() -> io::Result<()> {
                     }
                     KeyCode::Char(c @ '0'..='9') => {
                         app.pending_g = false;
-                        let digit = if c == '0' { 10 } else { c as usize - '0' as usize };
-                        let offset = app.pending_prefix.take().unwrap_or(0);
-                        let n = offset + digit - 1;
+                        let d = c as usize - '0' as usize;
+                        let n = app.pending_prefix.unwrap_or(0) * 10 + d;
+                        app.pending_digits += 1;
+                        app.pending_prefix = Some(n);
                         let col = &mut app.columns[app.active_col];
-                        if n < col.grouped.row_count {
-                            col.selected_row = n;
-                            col.sync_list_state();
+                        let lw = crate::grouped::label_width(col.grouped.row_count);
+                        if app.pending_digits >= lw {
+                            app.pending_prefix = None;
+                            app.pending_digits = 0;
+                            let row = n.saturating_sub(1);
+                            if row < col.grouped.row_count {
+                                col.selected_row = row;
+                                col.sync_list_state();
+                            }
+                            app.maybe_push_child_column();
                         }
-                        app.maybe_push_child_column();
                     }
                     KeyCode::Enter => {
                         app.pending_g = false;
@@ -536,7 +555,7 @@ fn main() -> io::Result<()> {
                             app.renaming = Some(RenameState::new(&e.name));
                         }
                     }
-                    KeyCode::Char('X') => {
+                    KeyCode::Char('m') => {
                         app.pending_g = false;
                         app.pending_prefix = None;
                         let col = &app.columns[app.active_col];
@@ -553,7 +572,7 @@ fn main() -> io::Result<()> {
                             app.selection.clear(); app.selection_anchor = None;
                         }
                     }
-                    KeyCode::Char('C') => {
+                    KeyCode::Char('y') => {
                         app.pending_g = false;
                         app.pending_prefix = None;
                         let col = &app.columns[app.active_col];
@@ -570,7 +589,7 @@ fn main() -> io::Result<()> {
                             app.selection.clear(); app.selection_anchor = None;
                         }
                     }
-                    KeyCode::Char('V') => {
+                    KeyCode::Char('p') => {
                         app.pending_g = false;
                         app.pending_prefix = None;
                         if let Some(ref cb) = app.clipboard.clone() {
@@ -579,12 +598,12 @@ fn main() -> io::Result<()> {
                             for src in &cb.paths {
                                 if let Some(filename) = src.file_name() {
                                     let single = ClipboardEntry { op: cb.op.clone(), path: src.clone(), paths: vec![src.clone()], set_at: cb.set_at };
-                                    let dst = unique_dest(&dest_dir, filename, src);
+                                    let dst = unique_dest(&dest_dir, filename, src, is_cut);
                                     do_paste(&single, &dst).ok();
                                 }
                             }
                             if is_cut { app.clipboard = None; }
-                            app.selection.clear(); app.selection_anchor = None;
+                            app.selection.clear(); app.selection_anchor = None; app.select_mode = false;
                             app.refresh();
                             app.maybe_push_child_column();
                         }
@@ -692,7 +711,7 @@ fn main() -> io::Result<()> {
                             app.maybe_push_child_column();
                         }
                     }
-                    KeyCode::Char('T') => {
+                    KeyCode::Char('%') => {
                         app.pending_g = false;
                         app.pending_prefix = None;
                         let col = &app.columns[app.active_col];
@@ -720,13 +739,10 @@ fn main() -> io::Result<()> {
                             app.maybe_push_child_column();
                         }
                     }
-                    KeyCode::Char(c) if qwerty_prefix_offset(c).is_some() => {
-                        app.pending_g = false;
-                        app.pending_prefix = qwerty_prefix_offset(c);
-                    }
                     _ => {
                         app.pending_g = false;
                         app.pending_prefix = None;
+                        app.pending_digits = 0;
                     }
                 }
             }
