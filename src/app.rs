@@ -48,6 +48,7 @@ pub struct App {
     pub select_mode: bool,
     pub pending_digits: usize,
     pub col_viewport_height: usize,
+    pub goto_query: Option<String>,
     pub selection: HashSet<PathBuf>,
     pub selection_anchor: Option<usize>, // row of last space-toggled entry
 }
@@ -71,6 +72,7 @@ impl App {
             select_mode: false,
             pending_digits: 0,
             col_viewport_height: 0,
+            goto_query: None,
             selection: HashSet::new(),
             selection_anchor: None,
         };

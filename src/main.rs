@@ -385,6 +385,40 @@ fn main() -> io::Result<()> {
                     continue;
                 }
 
+                // Goto mode intercepts all keys
+                if app.goto_query.is_some() {
+                    match key.code {
+                        KeyCode::Esc | KeyCode::Enter => { app.goto_query = None; }
+                        KeyCode::Backspace => {
+                            if let Some(ref mut q) = app.goto_query {
+                                q.pop();
+                            }
+                        }
+                        KeyCode::Char(c) => {
+                            if let Some(ref mut q) = app.goto_query {
+                                q.push(c);
+                            }
+                        }
+                        _ => {}
+                    }
+                    if let Some(ref q) = app.goto_query.clone() {
+                        if !q.is_empty() {
+                            let col = &mut app.columns[app.active_col];
+                            let ql = q.to_lowercase();
+                            if let Some(row) = (0..col.grouped.row_count).find(|&r| {
+                                col.grouped.entry_at_row(r)
+                                    .is_some_and(|e| e.name.to_lowercase().starts_with(&ql))
+                            }) {
+                                col.selected_row = row;
+                                col.sync_list_state();
+                                app.maybe_push_child_column();
+                            }
+                        }
+                    }
+                    needs_redraw = true;
+                    continue;
+                }
+
                 match key.code {
                     KeyCode::Esc | KeyCode::Char('q') => {
                         if app.select_mode {
@@ -473,6 +507,11 @@ fn main() -> io::Result<()> {
                         app.pending_prefix = None;
                         let vh = app.col_viewport_height;
                         app.columns[app.active_col].scroll_by(-5, vh);
+                    }
+                    KeyCode::Char('/') => {
+                        app.pending_g = false;
+                        app.pending_prefix = None;
+                        app.goto_query = Some(String::new());
                     }
                     KeyCode::Char('n') => {
                         app.pending_g = false;

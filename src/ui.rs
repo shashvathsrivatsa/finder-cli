@@ -24,7 +24,13 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         vec![]
     };
 
-    let status_spans: Option<Vec<Span>> = if let Some(path) = &app.confirming_delete {
+    let status_spans: Option<Vec<Span>> = if let Some(ref q) = app.goto_query {
+        Some(vec![
+            Span::styled("/", Style::default().fg(Color::Rgb(255, 200, 80)).add_modifier(Modifier::BOLD)),
+            Span::styled(q.clone(), Style::default().fg(Color::White)),
+            Span::styled("█", Style::default().fg(Color::Rgb(255, 200, 80))),
+        ])
+    } else if let Some(path) = &app.confirming_delete {
         let multi = app.pending_deletes.len() > 1;
         let (label, name) = if multi {
             ("Delete ".to_string(), format!("{} items", app.pending_deletes.len()))
