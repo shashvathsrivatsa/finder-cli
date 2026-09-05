@@ -29,11 +29,17 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             Span::styled("-- SELECT --", Style::default().fg(Color::Rgb(80, 200, 120)).add_modifier(Modifier::BOLD)),
         ])
     } else if let Some(path) = &app.confirming_delete {
-        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-        let kind = if path.is_dir() { "directory" } else { "file" };
+        let multi = app.pending_deletes.len() > 1;
+        let (label, name) = if multi {
+            ("Delete ".to_string(), format!("{} items", app.pending_deletes.len()))
+        } else {
+            let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let kind = if path.is_dir() { "directory" } else { "file" };
+            (format!("Delete {} ", kind), format!("\"{}\"", name))
+        };
         Some(vec![
-            Span::styled(format!("Delete {} ", kind), Style::default().fg(Color::Rgb(220, 50, 50))),
-            Span::styled(format!("\"{}\"", name), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled(label, Style::default().fg(Color::Rgb(220, 50, 50))),
+            Span::styled(name, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
             Span::styled("?  ", Style::default().fg(Color::Rgb(220, 50, 50))),
             Span::styled("[y]", Style::default().fg(Color::Rgb(80, 200, 120)).add_modifier(Modifier::BOLD)),
             Span::styled("es  ", Style::default().fg(Color::DarkGray)),
@@ -124,7 +130,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         let selected_path = col.selected_entry().map(|e| e.path.clone());
         // Only pass rename input for the active column
         let renaming = if is_active { app.renaming.as_ref() } else { None };
-        let (items, _) = col.grouped.list_items(selected_path.as_deref(), renaming);
+        let (items, _) = col.grouped.list_items(selected_path.as_deref(), renaming, &app.selection);
 
         let highlight_style = if is_active && app.renaming.is_some() {
             Style::default()

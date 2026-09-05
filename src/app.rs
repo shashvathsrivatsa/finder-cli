@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -22,7 +23,8 @@ pub enum ClipboardOp { Cut, Copy }
 #[derive(Clone)]
 pub struct ClipboardEntry {
     pub op: ClipboardOp,
-    pub path: PathBuf,
+    pub path: PathBuf,      // primary path (for single-item ops and flash display)
+    pub paths: Vec<PathBuf>, // all paths (single-item: vec![path])
     pub set_at: Instant,
 }
 
@@ -40,12 +42,15 @@ pub struct App {
     pub pending_prefix: Option<usize>,
     pub cd_target: Option<PathBuf>,
     pub renaming: Option<RenameState>,
-    pub confirming_delete: Option<PathBuf>,
+    pub confirming_delete: Option<PathBuf>,   // display name for confirmation
+    pub pending_deletes: Vec<PathBuf>,         // all paths to delete on confirm
     pub clipboard: Option<ClipboardEntry>,
     pub focused: bool,
     pub linked_pane: Option<PaneInfo>,
     pub pane_picker: Option<(Vec<PaneInfo>, usize)>, // (panes, selected_idx)
     pub select_mode: bool,
+    pub selection: HashSet<PathBuf>,
+    pub selection_anchor: Option<usize>, // row of last space-toggled entry
 }
 
 impl App {
@@ -59,11 +64,14 @@ impl App {
             cd_target: None,
             renaming: None,
             confirming_delete: None,
+            pending_deletes: Vec::new(),
             clipboard: None,
             focused: true,
             linked_pane: None,
             pane_picker: None,
             select_mode: false,
+            selection: HashSet::new(),
+            selection_anchor: None,
         };
         app.maybe_push_child_column();
         app

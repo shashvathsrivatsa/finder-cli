@@ -1,4 +1,5 @@
-use std::path::Path;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 
 use ratatui::{
     style::{Color, Modifier, Style},
@@ -104,7 +105,7 @@ impl GroupedEntries {
         Self { groups, entries, row_count, row_to_entry }
     }
 
-    pub fn list_items(&self, selected_entry_path: Option<&Path>, renaming: Option<&RenameState>) -> (Vec<ListItem<'static>>, usize) {
+    pub fn list_items(&self, selected_entry_path: Option<&Path>, renaming: Option<&RenameState>, selection: &HashSet<PathBuf>) -> (Vec<ListItem<'static>>, usize) {
         let mut items: Vec<ListItem<'static>> = Vec::new();
         let mut selected_item_index: usize = 0;
         let label_width = if self.row_count <= 10 { 1usize } else { 2 };
@@ -160,7 +161,14 @@ impl GroupedEntries {
                     selected_item_index = items.len();
                 }
 
-                items.push(ListItem::new(Line::from(spans)));
+                let in_selection = selection.contains(&e.path);
+                let item = ListItem::new(Line::from(spans));
+                let item = if in_selection {
+                    item.style(Style::default().bg(Color::Rgb(60, 40, 90)))
+                } else {
+                    item
+                };
+                items.push(item);
                 row_idx += 1;
             }
         }

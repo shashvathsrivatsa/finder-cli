@@ -202,12 +202,13 @@ fn main() -> io::Result<()> {
                 if app.confirming_delete.is_some() {
                     match key.code {
                         KeyCode::Char('y') => {
-                            let path = app.confirming_delete.take().unwrap();
-                            if path.is_dir() {
-                                let _ = std::fs::remove_dir_all(&path);
-                            } else {
-                                let _ = std::fs::remove_file(&path);
+                            app.confirming_delete = None;
+                            let paths = std::mem::take(&mut app.pending_deletes);
+                            for path in &paths {
+                                if path.is_dir() { let _ = std::fs::remove_dir_all(path); }
+                                else { let _ = std::fs::remove_file(path); }
                             }
+                            app.selection.clear(); app.selection_anchor = None;
                             app.refresh();
                             let col = &mut app.columns[app.active_col];
                             if col.selected_row >= col.grouped.row_count && col.selected_row > 0 {
@@ -215,7 +216,7 @@ fn main() -> io::Result<()> {
                             }
                             app.maybe_push_child_column();
                         }
-                        _ => { app.confirming_delete = None; }
+                        _ => { app.confirming_delete = None; app.pending_deletes.clear(); }
                     }
                     continue;
                 }
@@ -381,12 +382,54 @@ fn main() -> io::Result<()> {
 
                 match key.code {
                     KeyCode::Esc | KeyCode::Char('q') => {
-                        if app.select_mode { app.select_mode = false; } else { break; }
+                        if app.select_mode {
+                            app.select_mode = false;
+                            // keep selection so user can still X/C after exiting select mode
+                        } else {
+                            break;
+                        }
                     }
                     KeyCode::Char('S') => {
                         app.pending_g = false;
                         app.pending_prefix = None;
-                        app.select_mode = !app.select_mode;
+                        if app.select_mode {
+                            app.select_mode = false;
+                            app.selection.clear();
+                            app.selection_anchor = None;
+                        } else {
+                            app.select_mode = true;
+                        }
+                    }
+                    KeyCode::Char('.') if app.select_mode => {
+                        app.pending_g = false;
+                        app.pending_prefix = None;
+                        let col = &app.columns[app.active_col];
+                        let row = col.selected_row;
+                        if let Some(e) = col.grouped.entry_at_row(row) {
+                            let path = e.path.clone();
+                            if app.selection.contains(&path) {
+                                app.selection.remove(&path);
+                            } else {
+                                app.selection.insert(path);
+                                app.selection_anchor = Some(row);
+                            }
+                        }
+                    }
+                    KeyCode::Char(',') if app.select_mode => {
+                        app.pending_g = false;
+                        app.pending_prefix = None;
+                        let col = &app.columns[app.active_col];
+                        let current_row = col.selected_row;
+                        let anchor = app.selection_anchor.unwrap_or(current_row);
+                        let lo = anchor.min(current_row);
+                        let hi = anchor.max(current_row);
+                        let paths: Vec<_> = (lo..=hi)
+                            .filter_map(|r| col.grouped.entry_at_row(r).map(|e| e.path.clone()))
+                            .collect();
+                        for path in paths {
+                            app.selection.insert(path);
+                        }
+                        app.selection_anchor = Some(current_row);
                     }
                     KeyCode::Up | KeyCode::Char('k') => {
                         app.pending_g = false;
@@ -497,32 +540,53 @@ fn main() -> io::Result<()> {
                         app.pending_g = false;
                         app.pending_prefix = None;
                         let col = &app.columns[app.active_col];
-                        if let Some(e) = col.grouped.entry_at_row(col.selected_row) {
-                            app.clipboard = Some(ClipboardEntry { op: ClipboardOp::Cut, path: e.path.clone(), set_at: std::time::Instant::now() });
+                        let paths: Vec<PathBuf> = if !app.selection.is_empty() {
+                            let mut v: Vec<PathBuf> = app.selection.iter().cloned().collect();
+                            v.sort();
+                            v
+                        } else if let Some(e) = col.grouped.entry_at_row(col.selected_row) {
+                            vec![e.path.clone()]
+                        } else { vec![] };
+                        if !paths.is_empty() {
+                            let primary = paths[0].clone();
+                            app.clipboard = Some(ClipboardEntry { op: ClipboardOp::Cut, path: primary, paths, set_at: std::time::Instant::now() });
+                            app.selection.clear(); app.selection_anchor = None;
                         }
                     }
                     KeyCode::Char('C') => {
                         app.pending_g = false;
                         app.pending_prefix = None;
                         let col = &app.columns[app.active_col];
-                        if let Some(e) = col.grouped.entry_at_row(col.selected_row) {
-                            app.clipboard = Some(ClipboardEntry { op: ClipboardOp::Copy, path: e.path.clone(), set_at: std::time::Instant::now() });
+                        let paths: Vec<PathBuf> = if !app.selection.is_empty() {
+                            let mut v: Vec<PathBuf> = app.selection.iter().cloned().collect();
+                            v.sort();
+                            v
+                        } else if let Some(e) = col.grouped.entry_at_row(col.selected_row) {
+                            vec![e.path.clone()]
+                        } else { vec![] };
+                        if !paths.is_empty() {
+                            let primary = paths[0].clone();
+                            app.clipboard = Some(ClipboardEntry { op: ClipboardOp::Copy, path: primary, paths, set_at: std::time::Instant::now() });
+                            app.selection.clear(); app.selection_anchor = None;
                         }
                     }
                     KeyCode::Char('V') => {
                         app.pending_g = false;
                         app.pending_prefix = None;
                         if let Some(ref cb) = app.clipboard.clone() {
-                            if let Some(filename) = cb.path.file_name() {
-                                let col = &app.columns[app.active_col];
-                                let dest_dir = col.path.clone();
-                                let dst = unique_dest(&dest_dir, filename, &cb.path);
-                                let is_cut = cb.op == ClipboardOp::Cut;
-                                do_paste(cb, &dst).ok();
-                                if is_cut { app.clipboard = None; }
-                                app.refresh();
-                                app.maybe_push_child_column();
+                            let dest_dir = app.columns[app.active_col].path.clone();
+                            let is_cut = cb.op == ClipboardOp::Cut;
+                            for src in &cb.paths {
+                                if let Some(filename) = src.file_name() {
+                                    let single = ClipboardEntry { op: cb.op.clone(), path: src.clone(), paths: vec![src.clone()], set_at: cb.set_at };
+                                    let dst = unique_dest(&dest_dir, filename, src);
+                                    do_paste(&single, &dst).ok();
+                                }
                             }
+                            if is_cut { app.clipboard = None; }
+                            app.selection.clear(); app.selection_anchor = None;
+                            app.refresh();
+                            app.maybe_push_child_column();
                         }
                     }
                     KeyCode::Char('x') => {
@@ -585,9 +649,18 @@ fn main() -> io::Result<()> {
                     KeyCode::Char('D') => {
                         app.pending_g = false;
                         app.pending_prefix = None;
-                        let col = &app.columns[app.active_col];
-                        if let Some(e) = col.grouped.entry_at_row(col.selected_row) {
-                            app.confirming_delete = Some(e.path.clone());
+                        if !app.selection.is_empty() {
+                            let mut paths: Vec<PathBuf> = app.selection.iter().cloned().collect();
+                            paths.sort();
+                            let count = paths.len();
+                            app.pending_deletes = paths;
+                            app.confirming_delete = Some(PathBuf::from(format!("{} items", count)));
+                        } else {
+                            let col = &app.columns[app.active_col];
+                            if let Some(e) = col.grouped.entry_at_row(col.selected_row) {
+                                app.pending_deletes = vec![e.path.clone()];
+                                app.confirming_delete = Some(e.path.clone());
+                            }
                         }
                     }
                     KeyCode::Char('d') => {
