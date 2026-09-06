@@ -638,7 +638,7 @@ fn main() -> io::Result<()> {
                         if !paths.is_empty() {
                             let primary = paths[0].clone();
                             app.clipboard = Some(ClipboardEntry { op: ClipboardOp::Cut, path: primary, paths, set_at: std::time::Instant::now() });
-                            app.selection.clear(); app.selection_anchor = None;
+                            app.selection.clear(); app.selection_anchor = None; app.select_mode = false;
                         }
                     }
                     KeyCode::Char('y') => {
@@ -655,7 +655,7 @@ fn main() -> io::Result<()> {
                         if !paths.is_empty() {
                             let primary = paths[0].clone();
                             app.clipboard = Some(ClipboardEntry { op: ClipboardOp::Copy, path: primary, paths, set_at: std::time::Instant::now() });
-                            app.selection.clear(); app.selection_anchor = None;
+                            app.selection.clear(); app.selection_anchor = None; app.select_mode = false;
                         }
                     }
                     KeyCode::Char('p') => {
