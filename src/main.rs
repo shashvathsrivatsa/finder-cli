@@ -217,7 +217,8 @@ fn main() -> io::Result<()> {
 
         let flash_active = app.clipboard.as_ref()
             .is_some_and(|cb| cb.set_at.elapsed().as_millis() < CLIPBOARD_FLASH_MS as u128 + 50);
-        let poll_ms = if flash_active { 50 } else { 500 };
+        // let poll_ms = if flash_active { 50 } else { 100 };
+        let poll_ms = 16;        // 60fps
         if event::poll(Duration::from_millis(poll_ms))? {
             let ev = event::read()?;
             if matches!(ev, Event::FocusGained) { app.focused = true; needs_redraw = true; continue; }

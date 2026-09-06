@@ -12,7 +12,7 @@ use crate::rename::RenameState;
 pub const CLIPBOARD_FLASH_MS: u64 = 200;
 
 // How many rows Ctrl+D / Ctrl+U jump (half-page feel)
-pub const PAGE_JUMP: usize = 5;
+pub const PAGE_JUMP: usize = 10;
 
 #[derive(Clone, PartialEq)]
 pub enum ClipboardOp { Cut, Copy }
