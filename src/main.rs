@@ -118,6 +118,30 @@ fn open_tty() -> io::Result<std::fs::File> {
     std::fs::OpenOptions::new().read(true).write(true).open("/dev/tty")
 }
 
+fn load_hidden_paths() -> std::collections::HashSet<PathBuf> {
+    let exe_dir = std::env::current_exe().ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()));
+    let candidates = [
+        exe_dir.as_deref().map(|d| d.join("hidden")),
+        Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("hidden")),
+        Some(PathBuf::from("hidden")),
+    ];
+    let home = std::env::var("HOME").unwrap_or_default();
+    for path in candidates.into_iter().flatten() {
+        if let Ok(text) = std::fs::read_to_string(&path) {
+            return text.lines()
+                .map(|l| l.trim())
+                .filter(|l| !l.is_empty() && !l.starts_with('#'))
+                .map(|l| {
+                    let expanded = l.replacen("~/", &format!("{}/", home), 1);
+                    PathBuf::from(expanded)
+                })
+                .collect();
+        }
+    }
+    std::collections::HashSet::new()
+}
+
 fn load_default_app_exts() -> std::collections::HashSet<String> {
     let exe_dir = std::env::current_exe().ok()
         .and_then(|p| p.parent().map(|d| d.to_path_buf()));
@@ -178,6 +202,7 @@ fn main() -> io::Result<()> {
     let mut terminal = Terminal::new(backend)?;
 
     let default_app_exts = load_default_app_exts();
+    crate::entry::set_hidden_paths(load_hidden_paths());
     let mut app = App::new(start);
 
     let mut last_refresh = std::time::Instant::now();

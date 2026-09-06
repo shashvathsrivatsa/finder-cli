@@ -1,8 +1,16 @@
+use std::collections::HashSet;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use ratatui::style::Color;
+
+static HIDDEN_PATHS: OnceLock<HashSet<PathBuf>> = OnceLock::new();
+
+pub fn set_hidden_paths(paths: HashSet<PathBuf>) {
+    let _ = HIDDEN_PATHS.set(paths);
+}
 
 #[derive(Clone, Debug)]
 pub struct Entry {
@@ -182,6 +190,11 @@ pub fn read_dir_entries(path: &Path) -> Vec<Entry> {
             let name = p.file_name()?.to_string_lossy().into_owned();
             if name == ".DS_Store" {
                 return None;
+            }
+            if let Some(hidden) = HIDDEN_PATHS.get() {
+                if hidden.contains(&p) {
+                    return None;
+                }
             }
             let is_dir = p.is_dir();
             let is_executable = !is_dir
