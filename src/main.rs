@@ -68,6 +68,41 @@ fn count_files(path: &Path) -> usize {
     rd.flatten().map(|e| count_files(&e.path())).sum()
 }
 
+fn read_pdf_pages(path: &Path) -> Option<u64> {
+    // Try pdfinfo first (handles compressed PDFs)
+    if let Ok(out) = std::process::Command::new("pdfinfo").arg(path)
+        .stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null()).output()
+    {
+        let text = String::from_utf8_lossy(&out.stdout);
+        for line in text.lines() {
+            if line.starts_with("Pages:") {
+                if let Some(n) = line.split_whitespace().nth(1).and_then(|s| s.parse().ok()) {
+                    return Some(n);
+                }
+            }
+        }
+    }
+    // Fallback: scan raw bytes for /Count (works for uncompressed PDFs)
+    use std::io::Read;
+    let mut f = std::fs::File::open(path).ok()?;
+    let mut data = Vec::new();
+    f.read_to_end(&mut data).ok()?;
+    let needle = b"/Count ";
+    let mut max_count: Option<u64> = None;
+    for pos in data.windows(needle.len()).enumerate()
+        .filter_map(|(i, w)| if w == needle { Some(i + needle.len()) } else { None })
+    {
+        let digits: Vec<u8> = data[pos..].iter().take(10)
+            .take_while(|b| b.is_ascii_digit()).copied().collect();
+        if let Ok(s) = std::str::from_utf8(&digits) {
+            if let Ok(n) = s.parse::<u64>() {
+                max_count = Some(max_count.map_or(n, |m: u64| m.max(n)));
+            }
+        }
+    }
+    max_count
+}
+
 fn read_image_dims(path: &Path) -> Option<(u32, u32)> {
     use std::io::Read;
     let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
@@ -470,6 +505,7 @@ fn main() -> io::Result<()> {
                 let dims_cell = Arc::new(AtomicI64::new(i64::MIN));
                 let fps_cell = Arc::new(AtomicI64::new(i64::MIN));
                 let duration_cell = Arc::new(AtomicI64::new(i64::MIN));
+                let pages_cell = Arc::new(AtomicI64::new(i64::MIN));
                 app.preview_size = Some(size_cell.clone());
                 app.preview_modified = Some(modified_cell.clone());
                 app.preview_created = Some(created_cell.clone());
@@ -477,6 +513,7 @@ fn main() -> io::Result<()> {
                 app.preview_dims = Some(dims_cell.clone());
                 app.preview_fps = Some(fps_cell.clone());
                 app.preview_duration = Some(duration_cell.clone());
+                app.preview_pages = Some(pages_cell.clone());
                 std::thread::spawn(move || {
                     let size = dir_size(&path);
                     size_cell.store(size, Ordering::Relaxed);
@@ -522,6 +559,12 @@ fn main() -> io::Result<()> {
                         fps_cell.store(-1, Ordering::Relaxed);
                         duration_cell.store(-1, Ordering::Relaxed);
                     }
+
+                    if ext == "pdf" {
+                        pages_cell.store(read_pdf_pages(&path).map(|n| n as i64).unwrap_or(-1), Ordering::Relaxed);
+                    } else {
+                        pages_cell.store(-1, Ordering::Relaxed);
+                    }
                 });
                 needs_redraw = true;
             }
@@ -535,6 +578,7 @@ fn main() -> io::Result<()> {
             app.preview_dims = None;
             app.preview_fps = None;
             app.preview_duration = None;
+            app.preview_pages = None;
         }
 
         let flash_active = app.clipboard.as_ref()
@@ -1238,7 +1282,7 @@ fn main() -> io::Result<()> {
                             std::process::Command::new("open").arg("-R").arg(&e.path).spawn().ok();
                         }
                     }
-                    KeyCode::Char('c') if !app.select_mode => {
+                    KeyCode::Char('c') if !app.select_mode && !key.modifiers.contains(KeyModifiers::CONTROL) => {
                         app.pending_g = false;
                         app.pending_prefix = None;
                         let col = &app.columns[app.active_col];

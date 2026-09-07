@@ -246,8 +246,11 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                             else { format!("{:.1}s", v as f64) };
                         Some(format!("dur: {}", formatted))
                     });
+                    let pages_str = ready_i64(&app.preview_pages).and_then(|v| {
+                        if v > 0 { Some(format!("pages: {}", v)) } else { None }
+                    });
                     let parts: Vec<String> = if app.preview_mode == PreviewMode::Long {
-                        [size_str, modified_str, created_str, count_str, dim_fps_str, dur_str].into_iter().flatten().collect()
+                        [size_str, modified_str, created_str, count_str, dim_fps_str, dur_str, pages_str].into_iter().flatten().collect()
                     } else {
                         // Short: just the raw size without label
                         app.preview_size.as_ref().and_then(|cell| {

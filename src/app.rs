@@ -72,6 +72,7 @@ pub struct App {
     pub preview_dims: Option<Arc<AtomicI64>>,     // i64::MIN = computing, -1 = n/a, else (w<<32)|h
     pub preview_fps: Option<Arc<AtomicI64>>,      // i64::MIN = computing, -1 = n/a, else fps*100
     pub preview_duration: Option<Arc<AtomicI64>>, // i64::MIN = computing, -1 = n/a, else seconds
+    pub preview_pages: Option<Arc<AtomicI64>>,    // i64::MIN = computing, -1 = n/a, else page count
     pub clipboard: Option<ClipboardEntry>,
     pub focused: bool,
     pub linked_pane: Option<PaneInfo>,
@@ -120,6 +121,7 @@ impl App {
             preview_dims: None,
             preview_fps: None,
             preview_duration: None,
+            preview_pages: None,
             clipboard: None,
             focused: true,
             linked_pane: None,
