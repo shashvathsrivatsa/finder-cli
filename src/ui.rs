@@ -24,7 +24,37 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         vec![]
     };
 
-    let status_spans: Option<Vec<Span>> = if let Some(ref q) = app.goto_query {
+    const SPINNER: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+    let spinner_ch = SPINNER[app.spinner_frame % SPINNER.len()];
+
+    let bg_done = app.bg_progress.as_ref()
+        .map(|p| p.load(std::sync::atomic::Ordering::Relaxed))
+        .unwrap_or(0);
+    let bg_total = app.bg_total.as_ref()
+        .map(|t| t.load(std::sync::atomic::Ordering::Relaxed))
+        .unwrap_or(0);
+
+    let status_spans: Option<Vec<Span>> = if app.is_deleting {
+        let label = if bg_total > 0 {
+            format!("Deleting ({}/{})...", bg_done, bg_total)
+        } else {
+            "Deleting...".to_string()
+        };
+        Some(vec![
+            Span::styled(format!("{} ", spinner_ch), Style::default().fg(Color::Rgb(220, 50, 50))),
+            Span::styled(label, Style::default().fg(Color::Rgb(220, 50, 50)).add_modifier(Modifier::BOLD)),
+        ])
+    } else if app.is_pasting {
+        let label = if bg_total > 0 {
+            format!("Pasting ({}/{})...", bg_done, bg_total)
+        } else {
+            "Pasting...".to_string()
+        };
+        Some(vec![
+            Span::styled(format!("{} ", spinner_ch), Style::default().fg(Color::Rgb(100, 180, 255))),
+            Span::styled(label, Style::default().fg(Color::Rgb(100, 180, 255)).add_modifier(Modifier::BOLD)),
+        ])
+    } else if let Some(ref q) = app.goto_query {
         Some(vec![
             Span::styled("/", Style::default().fg(Color::Rgb(255, 200, 80)).add_modifier(Modifier::BOLD)),
             Span::styled(q.clone(), Style::default().fg(Color::White)),

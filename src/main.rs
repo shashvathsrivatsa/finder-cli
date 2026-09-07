@@ -7,6 +7,7 @@ mod ui;
 
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
 use std::time::Duration;
 
 use crossterm::{
@@ -31,14 +32,41 @@ fn copy_dest(path: &Path) -> PathBuf {
     (1u32..).map(|n| parent.join(make(n))).find(|p| !p.exists()).unwrap()
 }
 
-fn copy_dir(src: &Path, dst: &Path) -> io::Result<()> {
+fn copy_dir(src: &Path, dst: &Path, progress: &Arc<AtomicUsize>) -> io::Result<()> {
     std::fs::create_dir(dst)?;
     for entry in std::fs::read_dir(src)?.flatten() {
+        let ft = entry.file_type()?;
         let dst_path = dst.join(entry.file_name());
-        if entry.file_type()?.is_dir() { copy_dir(&entry.path(), &dst_path)?; }
-        else { std::fs::copy(&entry.path(), &dst_path)?; }
+        if ft.is_symlink() {
+            let target = std::fs::read_link(entry.path())?;
+            std::os::unix::fs::symlink(&target, &dst_path)?;
+            progress.fetch_add(1, Ordering::Relaxed);
+        } else if ft.is_dir() {
+            copy_dir(&entry.path(), &dst_path, progress)?;
+        } else {
+            std::fs::copy(&entry.path(), &dst_path)?;
+            progress.fetch_add(1, Ordering::Relaxed);
+        }
     }
     Ok(())
+}
+
+fn count_files(path: &Path) -> usize {
+    if path.is_file() { return 1; }
+    let Ok(rd) = std::fs::read_dir(path) else { return 0; };
+    rd.flatten().map(|e| count_files(&e.path())).sum()
+}
+
+fn delete_recursive(path: &Path, progress: &Arc<AtomicUsize>) {
+    if path.is_dir() {
+        if let Ok(rd) = std::fs::read_dir(path) {
+            for e in rd.flatten() { delete_recursive(&e.path(), progress); }
+        }
+        let _ = std::fs::remove_dir(path);
+    } else {
+        let _ = std::fs::remove_file(path);
+        progress.fetch_add(1, Ordering::Relaxed);
+    }
 }
 
 fn list_panes() -> Vec<PaneInfo> {
@@ -102,13 +130,13 @@ fn unique_dest(dir: &Path, filename: &std::ffi::OsStr, src: &Path, is_move: bool
     }
 }
 
-fn do_paste(entry: &ClipboardEntry, dst: &Path) -> io::Result<()> {
+fn do_paste(entry: &ClipboardEntry, dst: &Path, progress: &Arc<AtomicUsize>) -> io::Result<()> {
     if entry.path == dst { return Ok(()); }
     match entry.op {
-        ClipboardOp::Cut  => std::fs::rename(&entry.path, dst)?,
+        ClipboardOp::Cut  => { std::fs::rename(&entry.path, dst)?; progress.fetch_add(1, Ordering::Relaxed); }
         ClipboardOp::Copy => {
-            if entry.path.is_dir() { copy_dir(&entry.path, dst)?; }
-            else                   { std::fs::copy(&entry.path, dst).map(|_| ())?; }
+            if entry.path.is_dir() { copy_dir(&entry.path, dst, progress)?; }
+            else { std::fs::copy(&entry.path, dst).map(|_| ())?; progress.fetch_add(1, Ordering::Relaxed); }
         }
     }
     Ok(())
@@ -215,9 +243,46 @@ fn main() -> io::Result<()> {
             needs_redraw = false;
         }
 
+        // Poll background delete/paste completion
+        if let Some(ref rx) = app.bg_done_rx {
+            match rx.try_recv() {
+                Ok(()) => {
+                    app.bg_done_rx = None;
+                    app.bg_progress = None;
+                    app.bg_total = None;
+                    let was_deleting = app.is_deleting;
+                    app.is_deleting = false;
+                    app.is_pasting = false;
+                    app.selection.clear(); app.selection_anchor = None; app.select_mode = false;
+                    app.refresh();
+                    if was_deleting {
+                        let col = &mut app.columns[app.active_col];
+                        if col.selected_row >= col.grouped.row_count && col.selected_row > 0 {
+                            col.selected_row -= 1;
+                        }
+                    }
+                    app.maybe_push_child_column();
+                    needs_redraw = true;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    app.spinner_frame = app.spinner_frame.wrapping_add(1);
+                    needs_redraw = true;
+                }
+                Err(_) => {
+                    app.bg_done_rx = None;
+                    app.bg_progress = None;
+                    app.bg_total = None;
+                    app.is_deleting = false;
+                    app.is_pasting = false;
+                    needs_redraw = true;
+                }
+            }
+        }
+
         let flash_active = app.clipboard.as_ref()
             .is_some_and(|cb| cb.set_at.elapsed().as_millis() < CLIPBOARD_FLASH_MS as u128 + 50);
-        let poll_ms = if flash_active { 16 } else { 100 };
+        let bg_active = app.bg_done_rx.is_some();
+        let poll_ms = if flash_active || bg_active { 80 } else { 100 };
         if event::poll(Duration::from_millis(poll_ms))? {
             let ev = event::read()?;
             if matches!(ev, Event::FocusGained) { app.focused = true; needs_redraw = true; continue; }
@@ -234,17 +299,22 @@ fn main() -> io::Result<()> {
                         KeyCode::Char('y') => {
                             app.confirming_delete = None;
                             let paths = std::mem::take(&mut app.pending_deletes);
-                            for path in &paths {
-                                if path.is_dir() { let _ = std::fs::remove_dir_all(path); }
-                                else { let _ = std::fs::remove_file(path); }
-                            }
-                            app.selection.clear(); app.selection_anchor = None; app.select_mode = false;
-                            app.refresh();
-                            let col = &mut app.columns[app.active_col];
-                            if col.selected_row >= col.grouped.row_count && col.selected_row > 0 {
-                                col.selected_row -= 1;
-                            }
-                            app.maybe_push_child_column();
+                            app.is_deleting = true;
+                            app.spinner_frame = 0;
+                            let progress = Arc::new(AtomicUsize::new(0));
+                            let total = Arc::new(AtomicUsize::new(0));
+                            app.bg_progress = Some(progress.clone());
+                            app.bg_total = Some(total.clone());
+                            let (tx, rx) = std::sync::mpsc::channel();
+                            app.bg_done_rx = Some(rx);
+                            std::thread::spawn(move || {
+                                let t: usize = paths.iter().map(|p| count_files(p)).sum();
+                                total.store(t, Ordering::Relaxed);
+                                for path in &paths {
+                                    delete_recursive(path, &progress);
+                                }
+                                let _ = tx.send(());
+                            });
                         }
                         _ => { app.confirming_delete = None; app.pending_deletes.clear(); }
                     }
@@ -664,17 +734,28 @@ fn main() -> io::Result<()> {
                         if let Some(ref cb) = app.clipboard.clone() {
                             let dest_dir = app.columns[app.active_col].path.clone();
                             let is_cut = cb.op == ClipboardOp::Cut;
-                            for src in &cb.paths {
-                                if let Some(filename) = src.file_name() {
-                                    let single = ClipboardEntry { op: cb.op.clone(), path: src.clone(), paths: vec![src.clone()], set_at: cb.set_at };
-                                    let dst = unique_dest(&dest_dir, filename, src, is_cut);
-                                    do_paste(&single, &dst).ok();
+                            app.is_pasting = true;
+                            app.spinner_frame = 0;
+                            let progress = Arc::new(AtomicUsize::new(0));
+                            let total = Arc::new(AtomicUsize::new(0));
+                            app.bg_progress = Some(progress.clone());
+                            app.bg_total = Some(total.clone());
+                            let (tx, rx) = std::sync::mpsc::channel();
+                            app.bg_done_rx = Some(rx);
+                            let cb_clone = cb.clone();
+                            std::thread::spawn(move || {
+                                let t: usize = cb_clone.paths.iter().map(|p| count_files(p)).sum();
+                                total.store(t, Ordering::Relaxed);
+                                for src in &cb_clone.paths {
+                                    if let Some(filename) = src.file_name() {
+                                        let single = ClipboardEntry { op: cb_clone.op.clone(), path: src.clone(), paths: vec![src.clone()], set_at: cb_clone.set_at };
+                                        let dst = unique_dest(&dest_dir, filename, src, is_cut);
+                                        do_paste(&single, &dst, &progress).ok();
+                                    }
                                 }
-                            }
+                                let _ = tx.send(());
+                            });
                             if is_cut { app.clipboard = None; }
-                            app.selection.clear(); app.selection_anchor = None; app.select_mode = false;
-                            app.refresh();
-                            app.maybe_push_child_column();
                         }
                     }
                     KeyCode::Char('x') => {
@@ -736,7 +817,7 @@ fn main() -> io::Result<()> {
                         let col = &app.columns[app.active_col];
                         if let Some(e) = col.grouped.entry_at_row(col.selected_row) {
                             let dst = copy_dest(&e.path);
-                            if e.is_dir { copy_dir(&e.path, &dst).ok(); }
+                            if e.is_dir { copy_dir(&e.path, &dst, &Arc::new(AtomicUsize::new(0))).ok(); }
                             else { std::fs::copy(&e.path, &dst).ok(); }
                             let dst_name = dst.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
                             app.refresh();
