@@ -8,7 +8,7 @@ use ratatui::{
 
 use chrono::{DateTime, Local, Datelike, Timelike};
 
-use crate::app::{App, ClipboardOp, ConvertState, PaneInfo, PreviewMode, CLIPBOARD_FLASH_MS};
+use crate::app::{App, ClipboardOp, ConvertState, PaneInfo, PreviewMode, CLIPBOARD_FLASH_MS, YtdlpState};
 
 fn format_size(bytes: u64) -> String {
     const K: u64 = 1024;
@@ -66,6 +66,16 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         Some(vec![
             Span::styled(format!("{} ", spinner_ch), Style::default().fg(Color::Rgb(220, 50, 50))),
             Span::styled(label, Style::default().fg(Color::Rgb(220, 50, 50)).add_modifier(Modifier::BOLD)),
+        ])
+    } else if app.is_downloading {
+        let pct = app.ytdlp_progress.as_ref().map(|p| p.load(std::sync::atomic::Ordering::Relaxed));
+        let label = match pct {
+            Some(p) if p != u64::MAX => format!("Downloading... {}%", p),
+            _ => "Downloading...".to_string(),
+        };
+        Some(vec![
+            Span::styled(format!("{} ", spinner_ch), Style::default().fg(Color::Rgb(255, 100, 180))),
+            Span::styled(label, Style::default().fg(Color::Rgb(255, 100, 180)).add_modifier(Modifier::BOLD)),
         ])
     } else if app.is_converting {
         Some(vec![
@@ -133,9 +143,14 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     // Status takes priority — when active, hide preview entirely.
     // Name mode expands the bar height; short/long stay at 1 line.
-    let showing_status = !link_prefix.is_empty() || status_spans.is_some() || app.converting.is_some();
+    let showing_status = !link_prefix.is_empty() || status_spans.is_some() || app.converting.is_some() || app.ytdlp.is_some();
 
-    let status_height: u16 = if app.converting.is_some() {
+    let status_height: u16 = if app.ytdlp.is_some() {
+        match &app.ytdlp {
+            Some(YtdlpState::FormatPicker { formats, .. }) => ytdlp_format_height(formats.len(), full_area.width as usize) as u16,
+            _ => 1,
+        }
+    } else if app.converting.is_some() {
         app.converting.as_ref().map(|cs| convert_bar_height(cs, full_area.width as usize)).unwrap_or(1) as u16
     } else if !showing_status && app.preview_mode == PreviewMode::Name {
         let col = &app.columns[app.active_col];
@@ -155,7 +170,29 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     let area = chunks[0];
     let status_area = chunks[1];
 
-    if let Some(ref cs) = app.converting {
+    if let Some(ref yt) = app.ytdlp {
+        match yt {
+            YtdlpState::UrlInput(q) => {
+                let spans = vec![
+                    Span::styled("yt-dlp  ", Style::default().fg(Color::Rgb(255, 100, 180)).add_modifier(Modifier::BOLD)),
+                    Span::styled(q.clone(), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                    Span::styled("█", Style::default().fg(Color::Rgb(255, 100, 180))),
+                ];
+                frame.render_widget(Paragraph::new(Line::from(spans)), status_area);
+            }
+            YtdlpState::FetchingFormats(_) => {
+                let spans = vec![
+                    Span::styled(format!("{} ", spinner_ch), Style::default().fg(Color::Rgb(255, 100, 180))),
+                    Span::styled("Fetching formats...", Style::default().fg(Color::Rgb(255, 100, 180)).add_modifier(Modifier::BOLD)),
+                ];
+                frame.render_widget(Paragraph::new(Line::from(spans)), status_area);
+            }
+            YtdlpState::FormatPicker { formats, selected, .. } => {
+                let lines = ytdlp_format_lines(formats, *selected, status_area.width as usize);
+                frame.render_widget(Paragraph::new(lines), status_area);
+            }
+        }
+    } else if let Some(ref cs) = app.converting {
         let lines = convert_bar_lines(cs, status_area.width as usize);
         frame.render_widget(Paragraph::new(lines), status_area);
     } else if showing_status {
@@ -509,4 +546,42 @@ fn convert_bar_lines(cs: &ConvertState, width: usize) -> Vec<Line<'static>> {
 
 fn convert_bar_height(cs: &ConvertState, width: usize) -> usize {
     convert_bar_lines(cs, width).len().max(1)
+}
+
+fn ytdlp_format_lines(formats: &[crate::app::DynYtFormat], selected: usize, width: usize) -> Vec<Line<'static>> {
+    let prefix = "yt-dlp  quality  →  ";
+    let prefix_len = prefix.chars().count();
+    let indent = " ".repeat(prefix_len);
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    let mut current: Vec<Span<'static>> = vec![
+        Span::styled("yt-dlp  ", Style::default().fg(Color::Rgb(255, 100, 180)).add_modifier(Modifier::BOLD)),
+        Span::styled("quality  →  ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+    ];
+    let mut remaining = width.saturating_sub(prefix_len);
+    for (i, fmt) in formats.iter().enumerate() {
+        let w = fmt.label.len() + 4;
+        if current.len() > 2 && w > remaining {
+            lines.push(Line::from(std::mem::replace(&mut current, vec![Span::raw(indent.clone())])));
+            remaining = width.saturating_sub(prefix_len);
+        }
+        let label = fmt.label.clone();
+        if i == selected {
+            current.push(Span::styled(format!(" {} ", label),
+                Style::default().fg(Color::Black).bg(Color::Rgb(255, 100, 180)).add_modifier(Modifier::BOLD)));
+        } else {
+            current.push(Span::styled(format!(" {} ", label),
+                Style::default().fg(Color::Rgb(200, 80, 140))));
+        }
+        current.push(Span::raw("  "));
+        remaining = remaining.saturating_sub(w);
+    }
+    if !current.is_empty() { lines.push(Line::from(current)); }
+    lines
+}
+
+fn ytdlp_format_height(n_formats: usize, width: usize) -> usize {
+    let dummy: Vec<crate::app::DynYtFormat> = (0..n_formats).map(|_| crate::app::DynYtFormat {
+        label: "xxx".to_string(), format_arg: String::new(), extra_args: vec![],
+    }).collect();
+    ytdlp_format_lines(&dummy, 0, width).len().max(1)
 }

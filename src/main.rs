@@ -17,7 +17,7 @@ use crossterm::{
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
 
-use app::{App, ClipboardEntry, ClipboardOp, ConvertState, PaneInfo, CLIPBOARD_FLASH_MS, PAGE_JUMP, convert_formats_for, save_favorites, unique_output_path};
+use app::{App, ClipboardEntry, ClipboardOp, ConvertState, DynYtFormat, PaneInfo, CLIPBOARD_FLASH_MS, PAGE_JUMP, YtdlpState, convert_formats_for, save_favorites, unique_output_path};
 use rename::{RenameMode, RenameState};
 use ui::render;
 
@@ -66,6 +66,81 @@ fn count_files(path: &Path) -> usize {
     if path.is_file() { return 1; }
     let Ok(rd) = std::fs::read_dir(path) else { return 0; };
     rd.flatten().map(|e| count_files(&e.path())).sum()
+}
+
+fn fetch_ytdlp_formats(url: &str) -> Result<Vec<DynYtFormat>, String> {
+    let out = std::process::Command::new("yt-dlp")
+        .args(["--no-download", "-f", "all", "--print", "%(height)s\t%(abr)s\t%(vcodec)s\t%(acodec)s"])
+        .arg(url)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .map_err(|_| "yt-dlp not found".to_string())?;
+
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr);
+        let msg = err.lines().find(|l| !l.trim().is_empty()).unwrap_or("yt-dlp failed").to_string();
+        return Err(msg);
+    }
+
+    let text = String::from_utf8_lossy(&out.stdout);
+    let mut heights: std::collections::BTreeSet<u32> = std::collections::BTreeSet::new();
+    let mut abrs: std::collections::BTreeSet<u32> = std::collections::BTreeSet::new();
+
+    for line in text.lines() {
+        let parts: Vec<&str> = line.splitn(4, '\t').collect();
+        if parts.len() < 4 { continue; }
+        let height_s = parts[0].trim();
+        let abr_s = parts[1].trim();
+        let vcodec = parts[2].trim();
+        let acodec = parts[3].trim();
+
+        // video format
+        if vcodec != "none" && vcodec != "NA" {
+            if let Ok(h) = height_s.parse::<u32>() {
+                if h > 0 { heights.insert(h); }
+            }
+        }
+        // audio-only format
+        if (vcodec == "none" || vcodec == "NA") && acodec != "none" && acodec != "NA" {
+            if let Ok(a) = abr_s.parse::<f64>() {
+                let a = a.round() as u32;
+                if a > 0 { abrs.insert(a); }
+            }
+        }
+    }
+
+    let mut formats: Vec<DynYtFormat> = Vec::new();
+
+    // Video formats — descending height
+    for h in heights.into_iter().rev() {
+        let label = match h {
+            2160.. => format!("4K"),
+            1440.. => format!("2K"),
+            _ => format!("{}p", h),
+        };
+        formats.push(DynYtFormat {
+            label,
+            format_arg: format!("bestvideo[height<={}]+bestaudio/best[height<={}]", h, h),
+            extra_args: vec![],
+        });
+    }
+
+    // Audio formats — descending bitrate
+    for a in abrs.into_iter().rev() {
+        formats.push(DynYtFormat {
+            label: format!("{}kbps", a),
+            format_arg: "bestaudio".to_string(),
+            extra_args: vec!["--extract-audio".into(), "--audio-format".into(), "mp3".into(),
+                             "--audio-quality".into(), "0".into()],
+        });
+    }
+
+    if formats.is_empty() {
+        return Err("no formats found".to_string());
+    }
+    Ok(formats)
 }
 
 fn read_pdf_pages(path: &Path) -> Option<u64> {
@@ -445,6 +520,7 @@ fn main() -> io::Result<()> {
                     app.is_deleting = false;
                     app.is_pasting = false;
                     app.is_converting = false;
+                    app.is_downloading = false;
                     app.selection.clear(); app.selection_anchor = None; app.select_mode = false;
                     app.refresh();
                     if let Some(ref out) = convert_output {
@@ -483,6 +559,56 @@ fn main() -> io::Result<()> {
                     app.is_deleting = false;
                     app.is_pasting = false;
                     app.is_converting = false;
+                    app.is_downloading = false;
+                    needs_redraw = true;
+                }
+            }
+        }
+
+        if let Some(ref rx) = app.ytdlp_formats_rx {
+            match rx.try_recv() {
+                Ok(Ok(formats)) => {
+                    app.ytdlp_formats_rx = None;
+                    if let Some(YtdlpState::FetchingFormats(ref url)) = app.ytdlp {
+                        let url = url.clone();
+                        app.ytdlp = Some(YtdlpState::FormatPicker { url, formats, selected: 0 });
+                    }
+                    needs_redraw = true;
+                }
+                Ok(Err(err)) => {
+                    app.ytdlp_formats_rx = None;
+                    app.ytdlp = None;
+                    app.status_flash = Some((format!("yt-dlp: {}", err), std::time::Instant::now()));
+                    needs_redraw = true;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    app.spinner_frame = app.spinner_frame.wrapping_add(1);
+                    needs_redraw = true;
+                }
+                Err(_) => { app.ytdlp_formats_rx = None; needs_redraw = true; }
+            }
+        }
+
+        if let Some(ref rx) = app.ytdlp_error_rx {
+            match rx.try_recv() {
+                Ok(maybe_err) => {
+                    app.ytdlp_error_rx = None;
+                    app.ytdlp_progress = None;
+                    app.is_downloading = false;
+                    if let Some(err) = maybe_err {
+                        app.status_flash = Some((format!("yt-dlp: {}", err), std::time::Instant::now()));
+                    }
+                    app.refresh();
+                    app.maybe_push_child_column();
+                    needs_redraw = true;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    app.spinner_frame = app.spinner_frame.wrapping_add(1);
+                    needs_redraw = true;
+                }
+                Err(_) => {
+                    app.ytdlp_error_rx = None;
+                    app.is_downloading = false;
                     needs_redraw = true;
                 }
             }
@@ -583,7 +709,7 @@ fn main() -> io::Result<()> {
 
         let flash_active = app.clipboard.as_ref()
             .is_some_and(|cb| cb.set_at.elapsed().as_millis() < CLIPBOARD_FLASH_MS as u128 + 50);
-        let bg_active = app.bg_done_rx.is_some();
+        let bg_active = app.bg_done_rx.is_some() || app.ytdlp_error_rx.is_some() || app.ytdlp_formats_rx.is_some();
         let preview_pending = app.preview_size.as_ref()
             .map_or(false, |s| s.load(Ordering::Relaxed) == u64::MAX);
         if preview_pending && !bg_active {
@@ -848,6 +974,104 @@ fn main() -> io::Result<()> {
                             let _ = confirm_rename;
                         }
                     }
+                    continue;
+                }
+
+                // yt-dlp mode intercepts all keys
+                if app.ytdlp.is_some() {
+                    match key.code {
+                        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => break,
+                        KeyCode::Esc | KeyCode::Char('q') => {
+                            app.ytdlp = None;
+                            app.ytdlp_formats_rx = None;
+                        }
+                        _ => {}
+                    }
+                    match &mut app.ytdlp {
+                        Some(YtdlpState::UrlInput(q)) => {
+                            match key.code {
+                                KeyCode::Backspace => { q.pop(); }
+                                KeyCode::Enter => {
+                                    let url = q.trim().to_string();
+                                    if !url.is_empty() {
+                                        let url2 = url.clone();
+                                        app.ytdlp = Some(YtdlpState::FetchingFormats(url));
+                                        let (tx, rx) = std::sync::mpsc::channel();
+                                        app.ytdlp_formats_rx = Some(rx);
+                                        std::thread::spawn(move || {
+                                            let _ = tx.send(fetch_ytdlp_formats(&url2));
+                                        });
+                                    }
+                                }
+                                KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => { q.push(c); }
+                                _ => {}
+                            }
+                        }
+                        Some(YtdlpState::FetchingFormats(_)) => {} // waiting, keys ignored
+                        Some(YtdlpState::FormatPicker { formats, selected, .. }) => {
+                            let n = formats.len();
+                            match key.code {
+                                KeyCode::Left  => { if *selected > 0 { *selected -= 1; } }
+                                KeyCode::Right => { if *selected < n.saturating_sub(1) { *selected += 1; } }
+                                KeyCode::Enter => {
+                                    if let Some(YtdlpState::FormatPicker { url, formats, selected }) = app.ytdlp.take() {
+                                        app.is_downloading = true;
+                                        let fmt = &formats[selected];
+                                        let format_arg = fmt.format_arg.clone();
+                                        let extra = fmt.extra_args.clone();
+                                        let dl_dir = app.columns[app.active_col].path.clone();
+                                        let (done_tx, done_rx) = std::sync::mpsc::channel::<Option<String>>();
+                                        app.ytdlp_error_rx = Some(done_rx);
+                                        let progress_cell = Arc::new(AtomicU64::new(u64::MAX));
+                                        app.ytdlp_progress = Some(progress_cell.clone());
+                                        std::thread::spawn(move || {
+                                            use std::io::BufRead;
+                                            let mut cmd = std::process::Command::new("yt-dlp");
+                                            cmd.arg("-f").arg(&format_arg);
+                                            for a in &extra { cmd.arg(a); }
+                                            cmd.arg("--newline")
+                                               .arg("--output").arg("%(title)s.%(ext)s")
+                                               .arg(&url)
+                                               .current_dir(&dl_dir)
+                                               .stdin(std::process::Stdio::null())
+                                               .stdout(std::process::Stdio::piped())
+                                               .stderr(std::process::Stdio::piped());
+                                            let mut child = match cmd.spawn() {
+                                                Ok(c) => c,
+                                                Err(_) => { let _ = done_tx.send(Some("yt-dlp failed to start".into())); return; }
+                                            };
+                                            if let Some(stdout) = child.stdout.take() {
+                                                for line in std::io::BufReader::new(stdout).lines().flatten() {
+                                                    // "[download]  23.4% of ..."
+                                                    if line.contains("[download]") {
+                                                        if let Some(pct_s) = line.split_whitespace().find(|s| s.ends_with('%')) {
+                                                            if let Ok(pct) = pct_s.trim_end_matches('%').parse::<f64>() {
+                                                                progress_cell.store(pct.round() as u64, Ordering::Relaxed);
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            let status = child.wait().ok();
+                                            if status.map_or(true, |s| !s.success()) {
+                                                let mut err_msg = String::new();
+                                                if let Some(stderr) = child.stderr.take() {
+                                                    err_msg = std::io::BufReader::new(stderr).lines().flatten()
+                                                        .find(|l| !l.trim().is_empty()).unwrap_or_default();
+                                                }
+                                                let _ = done_tx.send(Some(if err_msg.is_empty() { "yt-dlp failed".into() } else { err_msg }));
+                                            } else {
+                                                let _ = done_tx.send(None);
+                                            }
+                                        });
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                        None => {}
+                    }
+                    needs_redraw = true;
                     continue;
                 }
 
@@ -1281,6 +1505,11 @@ fn main() -> io::Result<()> {
                         if let Some(e) = col.grouped.entry_at_row(col.selected_row) {
                             std::process::Command::new("open").arg("-R").arg(&e.path).spawn().ok();
                         }
+                    }
+                    KeyCode::Char('Y') => {
+                        app.pending_g = false;
+                        app.pending_prefix = None;
+                        app.ytdlp = Some(YtdlpState::UrlInput(String::new()));
                     }
                     KeyCode::Char('c') if !app.select_mode && !key.modifiers.contains(KeyModifiers::CONTROL) => {
                         app.pending_g = false;

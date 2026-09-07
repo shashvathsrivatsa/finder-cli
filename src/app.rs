@@ -40,6 +40,20 @@ pub struct PaneInfo {
 pub enum PreviewMode { Long, Short, Name }
 
 #[derive(Clone)]
+pub struct DynYtFormat {
+    pub label: String,
+    pub format_arg: String,
+    pub extra_args: Vec<String>,
+}
+
+#[derive(Clone)]
+pub enum YtdlpState {
+    UrlInput(String),
+    FetchingFormats(String),
+    FormatPicker { url: String, formats: Vec<DynYtFormat>, selected: usize },
+}
+
+#[derive(Clone)]
 pub struct ConvertState {
     pub source: PathBuf,
     pub formats: Vec<&'static str>,
@@ -89,6 +103,11 @@ pub struct App {
     pub favorites_cursor: usize,
     pub goto_base_dir: Option<PathBuf>,
     pub converting: Option<ConvertState>,
+    pub ytdlp: Option<YtdlpState>,
+    pub is_downloading: bool,
+    pub ytdlp_error_rx: Option<std::sync::mpsc::Receiver<Option<String>>>,
+    pub ytdlp_progress: Option<Arc<AtomicU64>>, // u64::MAX = unknown, else 0-100
+    pub ytdlp_formats_rx: Option<std::sync::mpsc::Receiver<Result<Vec<DynYtFormat>, String>>>,
     pub status_flash: Option<(String, std::time::Instant)>,
 }
 
@@ -138,6 +157,11 @@ impl App {
             favorites_cursor: 0,
             goto_base_dir: None,
             converting: None,
+            ytdlp: None,
+            is_downloading: false,
+            ytdlp_error_rx: None,
+            ytdlp_progress: None,
+            ytdlp_formats_rx: None,
             status_flash: None,
         };
         app.maybe_push_child_column();
@@ -222,6 +246,7 @@ impl App {
         }
     }
 }
+
 
 pub fn convert_formats_for(path: &Path) -> Vec<&'static str> {
     let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
