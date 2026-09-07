@@ -615,24 +615,59 @@ fn main() -> io::Result<()> {
                     match key.code {
                         KeyCode::Esc | KeyCode::Enter => { app.goto_query = None; }
                         KeyCode::Backspace => {
-                            if let Some(ref mut q) = app.goto_query {
-                                q.pop();
-                            }
+                            if let Some(ref mut q) = app.goto_query { q.pop(); }
                         }
                         KeyCode::Char(c) => {
-                            if let Some(ref mut q) = app.goto_query {
-                                q.push(c);
-                            }
+                            if let Some(ref mut q) = app.goto_query { q.push(c); }
                         }
                         _ => {}
                     }
+                    // Live navigate as user types, segment by segment
                     if let Some(ref q) = app.goto_query.clone() {
-                        if !q.is_empty() {
+                        let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+                        // Determine starting dir and segments
+                        let (mut cur_dir, segments): (PathBuf, Vec<&str>) = if q.starts_with('/') {
+                            (PathBuf::from("/"), q.splitn(2, '/').last().map(|s| s.split('/').collect()).unwrap_or_default())
+                        } else if q.starts_with("~/") || q == "~" {
+                            (PathBuf::from(&home), q[2..].split('/').collect())
+                        } else {
+                            let base = app.goto_base_dir.clone().unwrap_or_else(|| app.columns[0].path.clone());
+                            (base, q.split('/').collect())
+                        };
+
+                        // Navigate confirmed segments (all but last)
+                        let last_seg = segments.last().copied().unwrap_or("");
+                        let confirmed = if segments.len() > 1 { &segments[..segments.len()-1] } else { &[] };
+                        for seg in confirmed {
+                            if seg.is_empty() { continue; }
+                            // find first entry in cur_dir that starts with seg
+                            if let Ok(rd) = std::fs::read_dir(&cur_dir) {
+                                let seg_l = seg.to_lowercase();
+                                let mut matched: Vec<_> = rd.flatten()
+                                    .filter(|e| e.file_name().to_string_lossy().to_lowercase().starts_with(&seg_l))
+                                    .collect();
+                                matched.sort_by_key(|e| e.file_name());
+                                if let Some(entry) = matched.into_iter().find(|e| e.path().is_dir()) {
+                                    cur_dir = entry.path();
+                                }
+                            }
+                        }
+
+                        // Navigate to cur_dir if changed
+                        if app.columns[0].path != cur_dir {
+                            app.columns.truncate(1);
+                            app.columns[0] = crate::column::Column::new(cur_dir.clone());
+                            app.active_col = 0;
+                            app.maybe_push_child_column();
+                        }
+
+                        // Highlight matching entry for last segment
+                        if !last_seg.is_empty() {
+                            let seg_l = last_seg.to_lowercase();
                             let col = &mut app.columns[app.active_col];
-                            let ql = q.to_lowercase();
                             if let Some(row) = (0..col.grouped.row_count).find(|&r| {
                                 col.grouped.entry_at_row(r)
-                                    .is_some_and(|e| e.name.to_lowercase().starts_with(&ql))
+                                    .is_some_and(|e| e.name.to_lowercase().starts_with(&seg_l))
                             }) {
                                 col.selected_row = row;
                                 col.sync_list_state();
@@ -736,6 +771,7 @@ fn main() -> io::Result<()> {
                     KeyCode::Char('/') => {
                         app.pending_g = false;
                         app.pending_prefix = None;
+                        app.goto_base_dir = Some(app.columns[app.active_col].path.clone());
                         app.goto_query = Some(String::new());
                     }
                     KeyCode::Char('n') => {

@@ -74,6 +74,7 @@ pub struct App {
     pub favorites: HashSet<PathBuf>,
     pub favorites_view: bool,
     pub favorites_cursor: usize,
+    pub goto_base_dir: Option<PathBuf>,
 }
 
 impl App {
@@ -114,6 +115,7 @@ impl App {
             favorites: load_favorites(),
             favorites_view: false,
             favorites_cursor: 0,
+            goto_base_dir: None,
         };
         app.maybe_push_child_column();
         app
