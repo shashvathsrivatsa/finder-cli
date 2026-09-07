@@ -39,6 +39,13 @@ pub struct PaneInfo {
 #[derive(Clone, Copy, PartialEq)]
 pub enum PreviewMode { Long, Short, Name }
 
+#[derive(Clone)]
+pub struct ConvertState {
+    pub source: PathBuf,
+    pub formats: Vec<&'static str>,
+    pub selected: usize,
+}
+
 pub struct App {
     pub columns: Vec<Column>,
     pub active_col: usize,
@@ -50,6 +57,8 @@ pub struct App {
     pub pending_deletes: Vec<PathBuf>,         // all paths to delete on confirm
     pub is_deleting: bool,
     pub is_pasting: bool,
+    pub is_converting: bool,
+    pub convert_output: Option<PathBuf>,
     pub spinner_frame: usize,
     pub bg_done_rx: Option<std::sync::mpsc::Receiver<()>>,
     pub bg_progress: Option<std::sync::Arc<std::sync::atomic::AtomicUsize>>,
@@ -60,6 +69,9 @@ pub struct App {
     pub preview_modified: Option<Arc<AtomicI64>>, // i64::MIN = computing, else unix secs
     pub preview_created: Option<Arc<AtomicI64>>,  // i64::MIN = computing, -1 = unavailable, else unix secs
     pub preview_count: Option<Arc<AtomicI64>>,    // i64::MIN = computing, -1 = not a dir, else count
+    pub preview_dims: Option<Arc<AtomicI64>>,     // i64::MIN = computing, -1 = n/a, else (w<<32)|h
+    pub preview_fps: Option<Arc<AtomicI64>>,      // i64::MIN = computing, -1 = n/a, else fps*100
+    pub preview_duration: Option<Arc<AtomicI64>>, // i64::MIN = computing, -1 = n/a, else seconds
     pub clipboard: Option<ClipboardEntry>,
     pub focused: bool,
     pub linked_pane: Option<PaneInfo>,
@@ -75,6 +87,8 @@ pub struct App {
     pub favorites_view: bool,
     pub favorites_cursor: usize,
     pub goto_base_dir: Option<PathBuf>,
+    pub converting: Option<ConvertState>,
+    pub status_flash: Option<(String, std::time::Instant)>,
 }
 
 impl App {
@@ -91,6 +105,8 @@ impl App {
             pending_deletes: Vec::new(),
             is_deleting: false,
             is_pasting: false,
+            is_converting: false,
+            convert_output: None,
             spinner_frame: 0,
             bg_done_rx: None,
             bg_progress: None,
@@ -101,6 +117,9 @@ impl App {
             preview_modified: None,
             preview_created: None,
             preview_count: None,
+            preview_dims: None,
+            preview_fps: None,
+            preview_duration: None,
             clipboard: None,
             focused: true,
             linked_pane: None,
@@ -116,6 +135,8 @@ impl App {
             favorites_view: false,
             favorites_cursor: 0,
             goto_base_dir: None,
+            converting: None,
+            status_flash: None,
         };
         app.maybe_push_child_column();
         app
@@ -198,6 +219,42 @@ impl App {
             }
         }
     }
+}
+
+pub fn convert_formats_for(path: &Path) -> Vec<&'static str> {
+    let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
+    match ext.as_str() {
+        "jpg" | "jpeg" => vec!["png", "webp", "tiff", "pdf"],
+        "png"          => vec!["jpg", "webp", "tiff", "pdf"],
+        "webp"         => vec!["jpg", "png", "tiff", "pdf"],
+        "tiff" | "tif" => vec!["jpg", "png", "webp", "pdf"],
+        "heic" | "heif"=> vec!["jpg", "png", "webp", "tiff", "pdf"],
+        "gif"          => vec!["mp4", "webm", "png"],
+        "mp4"          => vec!["mov", "webm", "gif", "mp3"],
+        "mov"          => vec!["mp4", "webm", "gif", "mp3"],
+        "webm"         => vec!["mp4", "mov", "gif", "mp3"],
+        "avi" | "mkv"  => vec!["mp4", "mov", "webm", "mp3"],
+        "mp3"          => vec!["wav", "flac", "ogg", "aac"],
+        "wav"          => vec!["mp3", "flac", "ogg", "aac"],
+        "flac"         => vec!["mp3", "wav", "ogg", "aac"],
+        "ogg" | "aac"  => vec!["mp3", "wav", "flac"],
+        "doc" | "docx" | "odt" | "rtf" | "txt" | "md" | "mdx" => vec!["pdf"],
+        "xls" | "xlsx" | "ods" | "csv" => vec!["pdf"],
+        "ppt" | "pptx" | "odp"         => vec!["pdf"],
+        _              => vec![],
+    }
+}
+
+pub fn unique_output_path(source: &Path, new_ext: &str) -> PathBuf {
+    let stem = source.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
+    let dir = source.parent().unwrap_or(Path::new("."));
+    let mut candidate = dir.join(format!("{}.{}", stem, new_ext));
+    let mut stem_s = stem.to_string();
+    while candidate.exists() {
+        stem_s = format!("{} copy", stem_s);
+        candidate = dir.join(format!("{}.{}", stem_s, new_ext));
+    }
+    candidate
 }
 
 fn favorites_path() -> PathBuf {

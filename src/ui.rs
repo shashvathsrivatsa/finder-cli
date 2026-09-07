@@ -8,7 +8,7 @@ use ratatui::{
 
 use chrono::{DateTime, Local, Datelike, Timelike};
 
-use crate::app::{App, ClipboardOp, PaneInfo, PreviewMode, CLIPBOARD_FLASH_MS};
+use crate::app::{App, ClipboardOp, ConvertState, PaneInfo, PreviewMode, CLIPBOARD_FLASH_MS};
 
 fn format_size(bytes: u64) -> String {
     const K: u64 = 1024;
@@ -67,6 +67,11 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             Span::styled(format!("{} ", spinner_ch), Style::default().fg(Color::Rgb(220, 50, 50))),
             Span::styled(label, Style::default().fg(Color::Rgb(220, 50, 50)).add_modifier(Modifier::BOLD)),
         ])
+    } else if app.is_converting {
+        Some(vec![
+            Span::styled(format!("{} ", spinner_ch), Style::default().fg(Color::Rgb(180, 140, 255))),
+            Span::styled("Converting...", Style::default().fg(Color::Rgb(180, 140, 255)).add_modifier(Modifier::BOLD)),
+        ])
     } else if app.is_pasting {
         let label = if bg_total > 0 {
             format!("Pasting ({}/{})...", bg_done, bg_total)
@@ -117,13 +122,22 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                 Span::styled(name, Style::default().fg(Color::DarkGray)),
             ])
         } else { None }
+    } else if let Some((ref msg, ref at)) = app.status_flash {
+        if at.elapsed().as_secs() < 3 {
+            Some(vec![Span::styled(msg.clone(), Style::default().fg(Color::Rgb(220, 50, 50)).add_modifier(Modifier::BOLD))])
+        } else {
+            app.status_flash = None;
+            None
+        }
     } else { None };
 
     // Status takes priority — when active, hide preview entirely.
     // Name mode expands the bar height; short/long stay at 1 line.
-    let showing_status = !link_prefix.is_empty() || status_spans.is_some();
+    let showing_status = !link_prefix.is_empty() || status_spans.is_some() || app.converting.is_some();
 
-    let status_height: u16 = if !showing_status && app.preview_mode == PreviewMode::Name {
+    let status_height: u16 = if app.converting.is_some() {
+        app.converting.as_ref().map(|cs| convert_bar_height(cs, full_area.width as usize)).unwrap_or(1) as u16
+    } else if !showing_status && app.preview_mode == PreviewMode::Name {
         let col = &app.columns[app.active_col];
         let name = col.grouped.entry_at_row(col.selected_row)
             .map(|e| e.name.as_str())
@@ -141,7 +155,10 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     let area = chunks[0];
     let status_area = chunks[1];
 
-    if showing_status {
+    if let Some(ref cs) = app.converting {
+        let lines = convert_bar_lines(cs, status_area.width as usize);
+        frame.render_widget(Paragraph::new(lines), status_area);
+    } else if showing_status {
         let mut spans = link_prefix;
         if let Some(s) = status_spans { spans.extend(s); }
         frame.render_widget(Paragraph::new(Line::from(spans)), status_area);
@@ -192,8 +209,45 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                     let count_str = ready(&app.preview_count).and_then(|c| {
                         if c >= 0 { Some(format!("items: {}", c)) } else { None }
                     });
+                    let ready_i64 = |cell: &Option<std::sync::Arc<std::sync::atomic::AtomicI64>>| -> Option<i64> {
+                        cell.as_ref().and_then(|c| {
+                            let v = c.load(std::sync::atomic::Ordering::Relaxed);
+                            if v == i64::MIN { None } else { Some(v) }
+                        })
+                    };
+                    let dims_str = ready_i64(&app.preview_dims).and_then(|v| {
+                        if v < 0 { None } else {
+                            let w = (v >> 32) as u32;
+                            let h = (v & 0xFFFFFFFF) as u32;
+                            Some(format!("{}×{}", w, h))
+                        }
+                    });
+                    let fps_str = ready_i64(&app.preview_fps).and_then(|v| {
+                        if v < 0 { None } else {
+                            let fps = v as f64 / 100.0;
+                            let s = if fps.fract() < 0.05 { format!("{}p", fps.round() as u32) }
+                                    else { format!("{:.2}p", fps) };
+                            Some(s)
+                        }
+                    });
+                    let dim_fps_str = match (&dims_str, &fps_str) {
+                        (Some(d), Some(f)) => Some(format!("dim: {}/{}", d, f)),
+                        (Some(d), None)    => Some(format!("dim: {}", d)),
+                        _                  => None,
+                    };
+                    let dur_str = ready_i64(&app.preview_duration).and_then(|v| {
+                        if v < 0 { return None; }
+                        let secs = v as u64;
+                        let h = secs / 3600;
+                        let m = (secs % 3600) / 60;
+                        let s = secs % 60;
+                        let formatted = if h > 0 { format!("{}h {}m", h, m) }
+                            else if m > 0 { format!("{}m {}s", m, s) }
+                            else { format!("{:.1}s", v as f64) };
+                        Some(format!("dur: {}", formatted))
+                    });
                     let parts: Vec<String> = if app.preview_mode == PreviewMode::Long {
-                        [size_str, modified_str, created_str, count_str].into_iter().flatten().collect()
+                        [size_str, modified_str, created_str, count_str, dim_fps_str, dur_str].into_iter().flatten().collect()
                     } else {
                         // Short: just the raw size without label
                         app.preview_size.as_ref().and_then(|cell| {
@@ -407,4 +461,49 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         frame.render_widget(Clear, popup_area);
         frame.render_stateful_widget(list, popup_area, &mut list_state);
     }
+}
+
+fn convert_bar_lines(cs: &ConvertState, width: usize) -> Vec<Line<'static>> {
+    let name = cs.source.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let prefix_str = format!("convert  {}  →  ", name);
+    let prefix_len = prefix_str.chars().count();
+    // measure each option: " fmt " + "  " padding = fmt.len() + 4
+    let option_widths: Vec<usize> = cs.formats.iter().map(|f| f.len() + 4).collect();
+    // pack options into lines
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    let mut remaining = width.saturating_sub(prefix_len);
+    let mut current_spans: Vec<Span<'static>> = vec![
+        Span::styled("convert  ", Style::default().fg(Color::Rgb(180, 140, 255)).add_modifier(Modifier::BOLD)),
+        Span::styled(format!("{}  →  ", name), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+    ];
+    let indent = " ".repeat(prefix_len);
+    for (i, &fmt) in cs.formats.iter().enumerate() {
+        let w = option_widths[i];
+        if current_spans.len() > 2 && w > remaining {
+            lines.push(Line::from(std::mem::replace(&mut current_spans,
+                vec![Span::raw(indent.clone())])));
+            remaining = width.saturating_sub(prefix_len);
+        }
+        if i == cs.selected {
+            current_spans.push(Span::styled(
+                format!(" {} ", fmt),
+                Style::default().fg(Color::Black).bg(Color::Rgb(180, 140, 255)).add_modifier(Modifier::BOLD),
+            ));
+        } else {
+            current_spans.push(Span::styled(
+                format!(" {} ", fmt),
+                Style::default().fg(Color::Rgb(140, 100, 200)),
+            ));
+        }
+        current_spans.push(Span::raw("  "));
+        remaining = remaining.saturating_sub(w);
+    }
+    if !current_spans.is_empty() { lines.push(Line::from(current_spans)); }
+    lines
+}
+
+fn convert_bar_height(cs: &ConvertState, width: usize) -> usize {
+    convert_bar_lines(cs, width).len().max(1)
 }

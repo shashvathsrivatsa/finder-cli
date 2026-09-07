@@ -17,7 +17,7 @@ use crossterm::{
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
 
-use app::{App, ClipboardEntry, ClipboardOp, PaneInfo, CLIPBOARD_FLASH_MS, PAGE_JUMP, save_favorites};
+use app::{App, ClipboardEntry, ClipboardOp, ConvertState, PaneInfo, CLIPBOARD_FLASH_MS, PAGE_JUMP, convert_formats_for, save_favorites, unique_output_path};
 use rename::{RenameMode, RenameState};
 use ui::render;
 
@@ -66,6 +66,150 @@ fn count_files(path: &Path) -> usize {
     if path.is_file() { return 1; }
     let Ok(rd) = std::fs::read_dir(path) else { return 0; };
     rd.flatten().map(|e| count_files(&e.path())).sum()
+}
+
+fn read_image_dims(path: &Path) -> Option<(u32, u32)> {
+    use std::io::Read;
+    let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
+    let mut f = std::fs::File::open(path).ok()?;
+    match ext.as_str() {
+        "png" => {
+            let mut buf = [0u8; 24];
+            f.read_exact(&mut buf).ok()?;
+            if &buf[0..8] != b"\x89PNG\r\n\x1a\n" { return None; }
+            let w = u32::from_be_bytes(buf[16..20].try_into().ok()?);
+            let h = u32::from_be_bytes(buf[20..24].try_into().ok()?);
+            Some((w, h))
+        }
+        "jpg" | "jpeg" => {
+            let mut data = Vec::new();
+            f.read_to_end(&mut data).ok()?;
+            let mut i = 0usize;
+            while i + 1 < data.len() {
+                if data[i] != 0xFF { break; }
+                let marker = data[i + 1];
+                if matches!(marker, 0xC0 | 0xC1 | 0xC2) && i + 9 < data.len() {
+                    let h = u16::from_be_bytes([data[i+5], data[i+6]]) as u32;
+                    let w = u16::from_be_bytes([data[i+7], data[i+8]]) as u32;
+                    return Some((w, h));
+                }
+                if marker == 0xD8 || marker == 0xFF { i += 1; continue; }
+                if i + 3 >= data.len() { break; }
+                let len = u16::from_be_bytes([data[i+2], data[i+3]]) as usize;
+                i += 2 + len;
+            }
+            None
+        }
+        "gif" => {
+            let mut buf = [0u8; 10];
+            f.read_exact(&mut buf).ok()?;
+            if &buf[0..3] != b"GIF" { return None; }
+            let w = u16::from_le_bytes([buf[6], buf[7]]) as u32;
+            let h = u16::from_le_bytes([buf[8], buf[9]]) as u32;
+            Some((w, h))
+        }
+        "webp" => {
+            let mut buf = [0u8; 30];
+            f.read_exact(&mut buf).ok()?;
+            if &buf[0..4] != b"RIFF" || &buf[8..12] != b"WEBP" { return None; }
+            if &buf[12..16] == b"VP8 " {
+                let w = (u16::from_le_bytes([buf[26], buf[27]]) & 0x3FFF) as u32;
+                let h = (u16::from_le_bytes([buf[28], buf[29]]) & 0x3FFF) as u32;
+                Some((w, h))
+            } else if &buf[12..16] == b"VP8L" {
+                let bits = u32::from_le_bytes([buf[21], buf[22], buf[23], buf[24]]);
+                let w = (bits & 0x3FFF) + 1;
+                let h = ((bits >> 14) & 0x3FFF) + 1;
+                Some((w, h))
+            } else { None }
+        }
+        "bmp" => {
+            let mut buf = [0u8; 26];
+            f.read_exact(&mut buf).ok()?;
+            if &buf[0..2] != b"BM" { return None; }
+            let w = u32::from_le_bytes(buf[18..22].try_into().ok()?);
+            let h = u32::from_le_bytes(buf[22..26].try_into().ok()?);
+            Some((w, h))
+        }
+        "tiff" | "tif" => {
+            use std::io::{Seek, SeekFrom};
+            let mut hdr = [0u8; 8];
+            f.read_exact(&mut hdr).ok()?;
+            let le = &hdr[0..2] == b"II";
+            let u16_ = |b: [u8;2]| if le { u16::from_le_bytes(b) } else { u16::from_be_bytes(b) };
+            let u32_ = |b: [u8;4]| if le { u32::from_le_bytes(b) } else { u32::from_be_bytes(b) };
+            if u16_([hdr[2], hdr[3]]) != 42 { return None; }
+            let ifd_off = u32_([hdr[4], hdr[5], hdr[6], hdr[7]]) as u64;
+            f.seek(SeekFrom::Start(ifd_off)).ok()?;
+            let mut cnt_buf = [0u8; 2];
+            f.read_exact(&mut cnt_buf).ok()?;
+            let count = u16_(cnt_buf) as usize;
+            let mut w = None::<u32>;
+            let mut h = None::<u32>;
+            for _ in 0..count {
+                let mut entry = [0u8; 12];
+                f.read_exact(&mut entry).ok()?;
+                let tag = u16_([entry[0], entry[1]]);
+                let typ = u16_([entry[2], entry[3]]);
+                let val = match typ {
+                    3 => u16_([entry[8], entry[9]]) as u32, // SHORT
+                    _ => u32_([entry[8], entry[9], entry[10], entry[11]]), // LONG
+                };
+                match tag {
+                    256 => w = Some(val),
+                    257 => h = Some(val),
+                    _ => {}
+                }
+                if w.is_some() && h.is_some() { break; }
+            }
+            w.zip(h)
+        }
+        "heic" | "heif" | "avif" => {
+            // ISOBMFF container: scan first 64KB for the `ispe` box (image spatial extents)
+            // ispe layout: size(4) type(4="ispe") version+flags(4) width(4) height(4)
+            let mut data = vec![0u8; 65536];
+            let n = f.read(&mut data).ok()?;
+            let data = &data[..n];
+            let needle = b"ispe";
+            data.windows(needle.len()).enumerate().find_map(|(i, w)| {
+                if w != needle { return None; }
+                let base = i + 4; // skip past "ispe"
+                if base + 8 > data.len() { return None; }
+                // skip 4-byte version+flags
+                let width  = u32::from_be_bytes(data[base+4..base+8].try_into().ok()?);
+                let height = u32::from_be_bytes(data[base+8..base+12].try_into().ok()?);
+                if width == 0 || height == 0 { return None; }
+                Some((width, height))
+            })
+        }
+        _ => None,
+    }
+}
+
+// returns (width, height, fps*100, duration_secs)
+fn read_video_info(path: &Path) -> Option<(u32, u32, i64, i64)> {
+    let out = std::process::Command::new("ffprobe")
+        .args(["-v", "quiet", "-select_streams", "v:0",
+               "-show_entries", "stream=width,height,r_frame_rate,duration",
+               "-of", "csv=p=0"])
+        .arg(path)
+        .output()
+        .ok()?;
+    let s = String::from_utf8_lossy(&out.stdout);
+    let line = s.lines().next()?;
+    let parts: Vec<&str> = line.split(',').collect();
+    if parts.len() < 4 { return None; }
+    let w: u32 = parts[0].trim().parse().ok()?;
+    let h: u32 = parts[1].trim().parse().ok()?;
+    // r_frame_rate is like "30/1" or "2997/100"
+    let fps_i64 = parts[2].trim().split('/').collect::<Vec<_>>().as_slice().chunks(2).next()
+        .and_then(|_| {
+            let nums: Vec<f64> = parts[2].split('/').filter_map(|n| n.parse().ok()).collect();
+            if nums.len() == 2 && nums[1] != 0.0 { Some(((nums[0] / nums[1]) * 100.0).round() as i64) }
+            else { None }
+        })?;
+    let dur: i64 = parts[3].trim().parse::<f64>().ok().map(|d| d.round() as i64).unwrap_or(-1);
+    Some((w, h, fps_i64, dur))
 }
 
 fn delete_recursive(path: &Path, progress: &Arc<AtomicUsize>) {
@@ -262,10 +406,28 @@ fn main() -> io::Result<()> {
                     app.bg_progress = None;
                     app.bg_total = None;
                     let was_deleting = app.is_deleting;
+                    let convert_output = app.convert_output.take();
                     app.is_deleting = false;
                     app.is_pasting = false;
+                    app.is_converting = false;
                     app.selection.clear(); app.selection_anchor = None; app.select_mode = false;
                     app.refresh();
+                    if let Some(ref out) = convert_output {
+                        if out.exists() {
+                            let col = &mut app.columns[app.active_col];
+                            if let Some(row) = col.grouped.row_to_entry.iter().position(|&i| col.grouped.entries[i].path == *out) {
+                                col.selected_row = row;
+                                col.sync_list_state();
+                            }
+                        } else {
+                            let ext = out.extension().and_then(|s| s.to_str()).unwrap_or("pdf");
+                            let tool = if ext == "pdf" { "soffice" } else { "ffmpeg/magick" };
+                            app.status_flash = Some((
+                                format!("Error: conversion failed (is {} installed?)", tool),
+                                std::time::Instant::now(),
+                            ));
+                        }
+                    }
                     if was_deleting {
                         let col = &mut app.columns[app.active_col];
                         if col.selected_row >= col.grouped.row_count && col.selected_row > 0 {
@@ -285,6 +447,7 @@ fn main() -> io::Result<()> {
                     app.bg_total = None;
                     app.is_deleting = false;
                     app.is_pasting = false;
+                    app.is_converting = false;
                     needs_redraw = true;
                 }
             }
@@ -304,10 +467,16 @@ fn main() -> io::Result<()> {
                 let modified_cell = Arc::new(AtomicI64::new(i64::MIN));
                 let created_cell = Arc::new(AtomicI64::new(i64::MIN));
                 let count_cell = Arc::new(AtomicI64::new(i64::MIN));
+                let dims_cell = Arc::new(AtomicI64::new(i64::MIN));
+                let fps_cell = Arc::new(AtomicI64::new(i64::MIN));
+                let duration_cell = Arc::new(AtomicI64::new(i64::MIN));
                 app.preview_size = Some(size_cell.clone());
                 app.preview_modified = Some(modified_cell.clone());
                 app.preview_created = Some(created_cell.clone());
                 app.preview_count = Some(count_cell.clone());
+                app.preview_dims = Some(dims_cell.clone());
+                app.preview_fps = Some(fps_cell.clone());
+                app.preview_duration = Some(duration_cell.clone());
                 std::thread::spawn(move || {
                     let size = dir_size(&path);
                     size_cell.store(size, Ordering::Relaxed);
@@ -328,6 +497,31 @@ fn main() -> io::Result<()> {
                         std::fs::read_dir(&path).map(|rd| rd.flatten().count() as i64).unwrap_or(-1)
                     } else { -1 };
                     count_cell.store(count, Ordering::Relaxed);
+
+                    let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
+                    let is_image = matches!(ext.as_str(), "png"|"jpg"|"jpeg"|"gif"|"webp"|"bmp"|"tiff"|"tif"|"heic"|"heif"|"avif");
+                    let is_video = matches!(ext.as_str(), "mp4"|"mov"|"avi"|"mkv"|"webm"|"gif");
+                    if is_image && !is_video {
+                        if let Some((w, h)) = read_image_dims(&path) {
+                            dims_cell.store((w as i64) << 32 | h as i64, Ordering::Relaxed);
+                        } else { dims_cell.store(-1, Ordering::Relaxed); }
+                        fps_cell.store(-1, Ordering::Relaxed);
+                        duration_cell.store(-1, Ordering::Relaxed);
+                    } else if is_video {
+                        if let Some((w, h, fps, dur)) = read_video_info(&path) {
+                            dims_cell.store((w as i64) << 32 | h as i64, Ordering::Relaxed);
+                            fps_cell.store(fps, Ordering::Relaxed);
+                            duration_cell.store(dur, Ordering::Relaxed);
+                        } else {
+                            dims_cell.store(-1, Ordering::Relaxed);
+                            fps_cell.store(-1, Ordering::Relaxed);
+                            duration_cell.store(-1, Ordering::Relaxed);
+                        }
+                    } else {
+                        dims_cell.store(-1, Ordering::Relaxed);
+                        fps_cell.store(-1, Ordering::Relaxed);
+                        duration_cell.store(-1, Ordering::Relaxed);
+                    }
                 });
                 needs_redraw = true;
             }
@@ -338,6 +532,9 @@ fn main() -> io::Result<()> {
             app.preview_modified = None;
             app.preview_created = None;
             app.preview_count = None;
+            app.preview_dims = None;
+            app.preview_fps = None;
+            app.preview_duration = None;
         }
 
         let flash_active = app.clipboard.as_ref()
@@ -606,6 +803,100 @@ fn main() -> io::Result<()> {
                             // suppress unused warning
                             let _ = confirm_rename;
                         }
+                    }
+                    continue;
+                }
+
+                // Convert mode intercepts all keys
+                if app.converting.is_some() {
+                    match key.code {
+                        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => break,
+                        KeyCode::Esc | KeyCode::Char('q') => { app.converting = None; }
+                        KeyCode::Left => {
+                            if let Some(ref mut cs) = app.converting {
+                                if cs.selected > 0 { cs.selected -= 1; }
+                            }
+                        }
+                        KeyCode::Right => {
+                            if let Some(ref mut cs) = app.converting {
+                                let max = cs.formats.len().saturating_sub(1);
+                                if cs.selected < max { cs.selected += 1; }
+                            }
+                        }
+                        KeyCode::Enter => {
+                            if let Some(cs) = app.converting.take() {
+                                let fmt = cs.formats[cs.selected];
+                                let ext = cs.source.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
+                                let is_doc = matches!(ext.as_str(),
+                                    "doc"|"docx"|"odt"|"rtf"|"txt"|"md"|"mdx"
+                                    |"xls"|"xlsx"|"ods"|"csv"|"ppt"|"pptx"|"odp");
+                                let is_image = matches!(ext.as_str(),
+                                    "jpg"|"jpeg"|"png"|"webp"|"tiff"|"tif"|"heic"|"heif"|"bmp"|"gif");
+                                let required_tool = if is_doc { "soffice" }
+                                    else if is_image { "magick" }
+                                    else { "ffmpeg" };
+                                let tool_ok = std::process::Command::new(required_tool)
+                                    .arg("--version").output().is_ok()
+                                    || (is_image && std::process::Command::new("ffmpeg")
+                                        .arg("-version").output().is_ok());
+                                if !tool_ok {
+                                    app.status_flash = Some((
+                                        format!("Error: missing {}", required_tool),
+                                        std::time::Instant::now(),
+                                    ));
+                                    continue;
+                                }
+                                let output = unique_output_path(&cs.source, fmt);
+                                let source = cs.source.clone();
+                                let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
+                                app.bg_done_rx = Some(done_rx);
+                                app.is_converting = true;
+                                app.convert_output = Some(output.clone());
+                                std::thread::spawn(move || {
+                                    let ext = source.extension()
+                                        .and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
+                                    let is_image = matches!(ext.as_str(),
+                                        "jpg"|"jpeg"|"png"|"webp"|"tiff"|"tif"|"heic"|"heif"|"bmp"|"gif");
+                                    let is_doc = matches!(ext.as_str(),
+                                        "doc"|"docx"|"odt"|"rtf"|"txt"|"md"|"mdx"
+                                        |"xls"|"xlsx"|"ods"|"csv"|"ppt"|"pptx"|"odp");
+                                    if is_doc {
+                                        // LibreOffice outputs stem.pdf into the dir; rename if needed
+                                        let out_dir = output.parent().unwrap_or(Path::new("."));
+                                        std::process::Command::new("soffice")
+                                            .args(["--headless", "--convert-to", "pdf", "--outdir"])
+                                            .arg(out_dir)
+                                            .arg(&source)
+                                            .stdin(std::process::Stdio::null())
+                                            .stdout(std::process::Stdio::null())
+                                            .stderr(std::process::Stdio::null())
+                                            .output()
+                                            .ok();
+                                        // libreoffice creates stem.pdf next to source
+                                        let stem = source.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
+                                        let lo_out = out_dir.join(format!("{}.pdf", stem));
+                                        if lo_out.exists() && lo_out != output {
+                                            std::fs::rename(&lo_out, &output).ok();
+                                        }
+                                    } else if is_image {
+                                        let has_magick = std::process::Command::new("magick")
+                                            .arg("--version").output().is_ok();
+                                        if has_magick {
+                                            std::process::Command::new("magick")
+                                                .arg(&source).arg(&output).output().ok();
+                                        } else {
+                                            std::process::Command::new("ffmpeg")
+                                                .args(["-y", "-i"]).arg(&source).arg(&output).output().ok();
+                                        }
+                                    } else {
+                                        std::process::Command::new("ffmpeg")
+                                            .args(["-y", "-i"]).arg(&source).arg(&output).output().ok();
+                                    }
+                                    let _ = done_tx.send(());
+                                });
+                            }
+                        }
+                        _ => {}
                     }
                     continue;
                 }
@@ -945,6 +1236,23 @@ fn main() -> io::Result<()> {
                         let col = &app.columns[app.active_col];
                         if let Some(e) = col.grouped.entry_at_row(col.selected_row) {
                             std::process::Command::new("open").arg("-R").arg(&e.path).spawn().ok();
+                        }
+                    }
+                    KeyCode::Char('c') if !app.select_mode => {
+                        app.pending_g = false;
+                        app.pending_prefix = None;
+                        let col = &app.columns[app.active_col];
+                        if let Some(e) = col.grouped.entry_at_row(col.selected_row) {
+                            if !e.is_dir {
+                                let formats = convert_formats_for(&e.path);
+                                if !formats.is_empty() {
+                                    app.converting = Some(ConvertState {
+                                        source: e.path.clone(),
+                                        formats,
+                                        selected: 0,
+                                    });
+                                }
+                            }
                         }
                     }
                     KeyCode::Char('x') => {
