@@ -280,7 +280,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         let selected_path = col.selected_entry().map(|e| e.path.clone());
         // Only pass rename input for the active column
         let renaming = if is_active { app.renaming.as_ref() } else { None };
-        let (items, _) = col.grouped.list_items(selected_path.as_deref(), renaming, &app.selection);
+        let (items, _) = col.grouped.list_items(selected_path.as_deref(), renaming, &app.selection, &app.favorites);
 
         let highlight_style = if is_active && app.renaming.is_some() {
             Style::default()
@@ -297,6 +297,51 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             .style(Style::default().fg(Color::Rgb(200, 200, 200)));
 
         frame.render_stateful_widget(list, inner, &mut col.list_state);
+    }
+
+    if app.favorites_view {
+        let mut favs: Vec<&std::path::PathBuf> = app.favorites.iter().collect();
+        favs.sort();
+
+        let overlay_w = (area.width * 2 / 3).max(40).min(area.width);
+        let overlay_h = (favs.len() as u16 + 4).min(area.height.saturating_sub(4)).max(5);
+        let overlay = Rect {
+            x: area.x + (area.width.saturating_sub(overlay_w)) / 2,
+            y: area.y + (area.height.saturating_sub(overlay_h)) / 2,
+            width: overlay_w,
+            height: overlay_h,
+        };
+        frame.render_widget(Clear, overlay);
+
+        let block = Block::bordered()
+            .title(Span::styled(" Favorites ", Style::default().fg(Color::Rgb(255, 200, 50)).add_modifier(Modifier::BOLD)))
+            .border_style(Style::default().fg(Color::Rgb(255, 200, 50)))
+            .style(Style::default().bg(Color::Black));
+        let inner = block.inner(overlay);
+        frame.render_widget(block, overlay);
+
+        let items: Vec<ListItem> = if favs.is_empty() {
+            vec![ListItem::new(Span::styled("  No favorites yet. Press f to add.", Style::default().fg(Color::DarkGray)))]
+        } else {
+            favs.iter().map(|p| {
+                let is_dir = p.is_dir();
+                let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| p.to_string_lossy().into_owned());
+                let display_name = if is_dir { format!("{}/", name) } else { name };
+                let parent = p.parent().and_then(|p| p.to_str()).unwrap_or("").to_string();
+                ListItem::new(Line::from(vec![
+                    Span::styled(format!("  {}", display_name), Style::default().fg(Color::White)),
+                    Span::styled(format!("  {}", parent), Style::default().fg(Color::Rgb(180, 180, 180))),
+                ]))
+            }).collect()
+        };
+
+        let cursor = app.favorites_cursor.min(favs.len().saturating_sub(1));
+        let mut list_state = ratatui::widgets::ListState::default();
+        list_state.select(if favs.is_empty() { None } else { Some(cursor) });
+
+        let list = List::new(items)
+            .highlight_style(Style::default().bg(Color::Rgb(0, 92, 197)).add_modifier(Modifier::BOLD));
+        frame.render_stateful_widget(list, inner, &mut list_state);
     }
 
     if let Some((ref panes, sel)) = app.pane_picker {

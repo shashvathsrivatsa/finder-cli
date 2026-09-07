@@ -17,7 +17,7 @@ use crossterm::{
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
 
-use app::{App, ClipboardEntry, ClipboardOp, PaneInfo, CLIPBOARD_FLASH_MS, PAGE_JUMP};
+use app::{App, ClipboardEntry, ClipboardOp, PaneInfo, CLIPBOARD_FLASH_MS, PAGE_JUMP, save_favorites};
 use rename::{RenameMode, RenameState};
 use ui::render;
 
@@ -415,6 +415,58 @@ fn main() -> io::Result<()> {
                         KeyCode::Char('u') => {
                             app.linked_pane = None;
                             app.pane_picker = None;
+                        }
+                        _ => {}
+                    }
+                    continue;
+                }
+
+                // Favorites view intercepts all keys
+                if app.favorites_view {
+                    let favs: Vec<std::path::PathBuf> = {
+                        let mut v: Vec<_> = app.favorites.iter().cloned().collect();
+                        v.sort();
+                        v
+                    };
+                    match key.code {
+                        KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('F') => {
+                            app.favorites_view = false;
+                        }
+                        KeyCode::Char('j') | KeyCode::Down => {
+                            if !favs.is_empty() {
+                                app.favorites_cursor = (app.favorites_cursor + 1).min(favs.len() - 1);
+                            }
+                        }
+                        KeyCode::Char('k') | KeyCode::Up => {
+                            app.favorites_cursor = app.favorites_cursor.saturating_sub(1);
+                        }
+                        KeyCode::Enter => {
+                            if let Some(path) = favs.get(app.favorites_cursor) {
+                                let target = if path.is_dir() { path.clone() } else {
+                                    path.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| path.clone())
+                                };
+                                app.columns.truncate(1);
+                                app.columns[0] = crate::column::Column::new(target.clone());
+                                app.active_col = 0;
+                                // select the specific entry if it's a file
+                                if !path.is_dir() {
+                                    if let Some(row) = app.columns[0].grouped.row_to_entry.iter().position(|&i| {
+                                        app.columns[0].grouped.entries[i].path == *path
+                                    }) {
+                                        app.columns[0].selected_row = row;
+                                        app.columns[0].sync_list_state();
+                                    }
+                                }
+                                app.maybe_push_child_column();
+                                app.favorites_view = false;
+                            }
+                        }
+                        KeyCode::Char('f') => {
+                            if let Some(path) = favs.get(app.favorites_cursor).cloned() {
+                                app.favorites.remove(&path);
+                                save_favorites(&app.favorites);
+                                app.favorites_cursor = app.favorites_cursor.min(app.favorites.len().saturating_sub(1));
+                            }
                         }
                         _ => {}
                     }
@@ -879,12 +931,19 @@ fn main() -> io::Result<()> {
                         app.pending_prefix = None;
                         let col = &app.columns[app.active_col];
                         if let Some(e) = col.grouped.entry_at_row(col.selected_row) {
-                            std::process::Command::new("open")
-                                .arg("-R")
-                                .arg(&e.path)
-                                .spawn()
-                                .ok();
+                            if app.favorites.contains(&e.path) {
+                                app.favorites.remove(&e.path);
+                            } else {
+                                app.favorites.insert(e.path.clone());
+                            }
+                            save_favorites(&app.favorites);
                         }
+                    }
+                    KeyCode::Char('F') => {
+                        app.pending_g = false;
+                        app.pending_prefix = None;
+                        app.favorites_view = !app.favorites_view;
+                        app.favorites_cursor = 0;
                     }
                     KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                         app.pending_g = false;

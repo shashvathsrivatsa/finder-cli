@@ -99,7 +99,7 @@ impl GroupedEntries {
         Self { groups, entries, row_count, row_to_entry }
     }
 
-    pub fn list_items(&self, selected_entry_path: Option<&Path>, renaming: Option<&RenameState>, selection: &HashSet<PathBuf>) -> (Vec<ListItem<'static>>, usize) {
+    pub fn list_items(&self, selected_entry_path: Option<&Path>, renaming: Option<&RenameState>, selection: &HashSet<PathBuf>, favorites: &HashSet<PathBuf>) -> (Vec<ListItem<'static>>, usize) {
         let mut items: Vec<ListItem<'static>> = Vec::new();
         let mut selected_item_index: usize = 0;
         let lw = label_width(self.row_count);
@@ -150,6 +150,9 @@ impl GroupedEntries {
                     };
                     spans.push(Span::styled(format!("{} ", icon), Style::default().fg(icon_color)));
                     spans.push(Span::raw(entry_label));
+                    if favorites.contains(&e.path) {
+                        spans.push(Span::styled("★", Style::default().fg(Color::Rgb(255, 200, 50))));
+                    }
                 }
 
                 if is_selected {

@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, atomic::{AtomicI64, AtomicU64}};
 use std::time::Instant;
 
@@ -71,6 +71,9 @@ pub struct App {
     pub selection: HashSet<PathBuf>,
     pub selection_anchor: Option<usize>, // row of last space-toggled entry
     pub preview_mode: PreviewMode,
+    pub favorites: HashSet<PathBuf>,
+    pub favorites_view: bool,
+    pub favorites_cursor: usize,
 }
 
 impl App {
@@ -108,6 +111,9 @@ impl App {
             selection: HashSet::new(),
             selection_anchor: None,
             preview_mode: PreviewMode::Short,
+            favorites: load_favorites(),
+            favorites_view: false,
+            favorites_cursor: 0,
         };
         app.maybe_push_child_column();
         app
@@ -190,4 +196,31 @@ impl App {
             }
         }
     }
+}
+
+fn favorites_path() -> PathBuf {
+    let base = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    Path::new(&base).join(".local/share/dir-viewer/favorites")
+}
+
+pub fn load_favorites() -> HashSet<PathBuf> {
+    let path = favorites_path();
+    std::fs::read_to_string(&path)
+        .unwrap_or_default()
+        .lines()
+        .filter(|l| !l.is_empty())
+        .map(PathBuf::from)
+        .collect()
+}
+
+pub fn save_favorites(favorites: &HashSet<PathBuf>) {
+    let path = favorites_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content: String = favorites.iter()
+        .filter_map(|p| p.to_str())
+        .map(|s| format!("{}\n", s))
+        .collect();
+    let _ = std::fs::write(&path, content);
 }
