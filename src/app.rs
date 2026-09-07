@@ -50,7 +50,13 @@ pub struct DynYtFormat {
 pub enum YtdlpState {
     UrlInput(String),
     FetchingFormats(String),
-    FormatPicker { url: String, formats: Vec<DynYtFormat>, selected: usize },
+    FormatPicker {
+        url: String,
+        video: Vec<DynYtFormat>,
+        audio: Vec<DynYtFormat>,
+        section: usize, // 0 = video, 1 = audio
+        selected: usize,
+    },
 }
 
 #[derive(Clone)]
@@ -107,7 +113,7 @@ pub struct App {
     pub is_downloading: bool,
     pub ytdlp_error_rx: Option<std::sync::mpsc::Receiver<Option<String>>>,
     pub ytdlp_progress: Option<Arc<AtomicU64>>, // u64::MAX = unknown, else 0-100
-    pub ytdlp_formats_rx: Option<std::sync::mpsc::Receiver<Result<Vec<DynYtFormat>, String>>>,
+    pub ytdlp_formats_rx: Option<std::sync::mpsc::Receiver<Result<(Vec<DynYtFormat>, Vec<DynYtFormat>), String>>>,
     pub status_flash: Option<(String, std::time::Instant)>,
 }
 

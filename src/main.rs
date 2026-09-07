@@ -68,7 +68,28 @@ fn count_files(path: &Path) -> usize {
     rd.flatten().map(|e| count_files(&e.path())).sum()
 }
 
-fn fetch_ytdlp_formats(url: &str) -> Result<Vec<DynYtFormat>, String> {
+fn pill_centers(section_label: &str, formats: &[DynYtFormat]) -> Vec<usize> {
+    let prefix_len = "yt-dlp  ".len() + section_label.len() + "  \u{2192}  ".len();
+    let mut pos = prefix_len;
+    formats.iter().map(|f| {
+        let pill = f.label.len() + 2;
+        let center = pos + pill / 2;
+        pos += pill + 2;
+        center
+    }).collect()
+}
+
+fn closest_format_index(from_label: &str, from_fmts: &[DynYtFormat], from_idx: usize, to_label: &str, to_fmts: &[DynYtFormat]) -> usize {
+    let from_centers = pill_centers(from_label, from_fmts);
+    let to_centers = pill_centers(to_label, to_fmts);
+    let cur = from_centers.get(from_idx).copied().unwrap_or(0) as isize;
+    to_centers.iter().enumerate()
+        .min_by_key(|(_, c)| (**c as isize - cur).abs())
+        .map(|(i, _)| i)
+        .unwrap_or(0)
+}
+
+fn fetch_ytdlp_formats(url: &str) -> Result<(Vec<DynYtFormat>, Vec<DynYtFormat>), String> {
     let out = std::process::Command::new("yt-dlp")
         .args(["--no-download", "-f", "all", "--print", "%(height)s\t%(abr)s\t%(vcodec)s\t%(acodec)s"])
         .arg(url)
@@ -95,14 +116,11 @@ fn fetch_ytdlp_formats(url: &str) -> Result<Vec<DynYtFormat>, String> {
         let abr_s = parts[1].trim();
         let vcodec = parts[2].trim();
         let acodec = parts[3].trim();
-
-        // video format
         if vcodec != "none" && vcodec != "NA" {
             if let Ok(h) = height_s.parse::<u32>() {
                 if h > 0 { heights.insert(h); }
             }
         }
-        // audio-only format
         if (vcodec == "none" || vcodec == "NA") && acodec != "none" && acodec != "NA" {
             if let Ok(a) = abr_s.parse::<f64>() {
                 let a = a.round() as u32;
@@ -111,36 +129,30 @@ fn fetch_ytdlp_formats(url: &str) -> Result<Vec<DynYtFormat>, String> {
         }
     }
 
-    let mut formats: Vec<DynYtFormat> = Vec::new();
-
-    // Video formats — descending height
-    for h in heights.into_iter().rev() {
+    let video: Vec<DynYtFormat> = heights.into_iter().rev().map(|h| {
         let label = match h {
-            2160.. => format!("4K"),
-            1440.. => format!("2K"),
+            2160.. => "4K".to_string(),
+            1440.. => "2K".to_string(),
             _ => format!("{}p", h),
         };
-        formats.push(DynYtFormat {
+        DynYtFormat {
             label,
             format_arg: format!("bestvideo[height<={}]+bestaudio/best[height<={}]", h, h),
             extra_args: vec![],
-        });
-    }
+        }
+    }).collect();
 
-    // Audio formats — descending bitrate
-    for a in abrs.into_iter().rev() {
-        formats.push(DynYtFormat {
-            label: format!("{}kbps", a),
-            format_arg: "bestaudio".to_string(),
-            extra_args: vec!["--extract-audio".into(), "--audio-format".into(), "mp3".into(),
-                             "--audio-quality".into(), "0".into()],
-        });
-    }
+    let audio: Vec<DynYtFormat> = abrs.into_iter().rev().map(|a| DynYtFormat {
+        label: format!("{}kbps", a),
+        format_arg: "bestaudio".to_string(),
+        extra_args: vec!["--extract-audio".into(), "--audio-format".into(), "mp3".into(),
+                         "--audio-quality".into(), "0".into()],
+    }).collect();
 
-    if formats.is_empty() {
+    if video.is_empty() && audio.is_empty() {
         return Err("no formats found".to_string());
     }
-    Ok(formats)
+    Ok((video, audio))
 }
 
 fn read_pdf_pages(path: &Path) -> Option<u64> {
@@ -567,11 +579,11 @@ fn main() -> io::Result<()> {
 
         if let Some(ref rx) = app.ytdlp_formats_rx {
             match rx.try_recv() {
-                Ok(Ok(formats)) => {
+                Ok(Ok((video, audio))) => {
                     app.ytdlp_formats_rx = None;
                     if let Some(YtdlpState::FetchingFormats(ref url)) = app.ytdlp {
                         let url = url.clone();
-                        app.ytdlp = Some(YtdlpState::FormatPicker { url, formats, selected: 0 });
+                        app.ytdlp = Some(YtdlpState::FormatPicker { url, video, audio, section: 0, selected: 0 });
                     }
                     needs_redraw = true;
                 }
@@ -1008,14 +1020,27 @@ fn main() -> io::Result<()> {
                             }
                         }
                         Some(YtdlpState::FetchingFormats(_)) => {} // waiting, keys ignored
-                        Some(YtdlpState::FormatPicker { formats, selected, .. }) => {
-                            let n = formats.len();
+                        Some(YtdlpState::FormatPicker { video, audio, section, selected, .. }) => {
+                            let cur_len = if *section == 0 { video.len() } else { audio.len() };
                             match key.code {
                                 KeyCode::Left  => { if *selected > 0 { *selected -= 1; } }
-                                KeyCode::Right => { if *selected < n.saturating_sub(1) { *selected += 1; } }
+                                KeyCode::Right => { if *selected < cur_len.saturating_sub(1) { *selected += 1; } }
+                                KeyCode::Down => {
+                                    if *section == 0 {
+                                        *selected = closest_format_index("video", video, *selected, "audio", audio);
+                                        *section = 1;
+                                    }
+                                }
+                                KeyCode::Up => {
+                                    if *section == 1 {
+                                        *selected = closest_format_index("audio", audio, *selected, "video", video);
+                                        *section = 0;
+                                    }
+                                }
                                 KeyCode::Enter => {
-                                    if let Some(YtdlpState::FormatPicker { url, formats, selected }) = app.ytdlp.take() {
+                                    if let Some(YtdlpState::FormatPicker { url, video, audio, section, selected }) = app.ytdlp.take() {
                                         app.is_downloading = true;
+                                        let formats = if section == 0 { video } else { audio };
                                         let fmt = &formats[selected];
                                         let format_arg = fmt.format_arg.clone();
                                         let extra = fmt.extra_args.clone();
@@ -1287,6 +1312,18 @@ fn main() -> io::Result<()> {
                                 .stdout(std::process::Stdio::null())
                                 .stderr(std::process::Stdio::null())
                                 .spawn().ok();
+                            std::thread::spawn(|| {
+                                for _ in 0..40 {
+                                    std::thread::sleep(std::time::Duration::from_millis(50));
+                                    let out = std::process::Command::new("osascript")
+                                        .arg("-e")
+                                        .arg("tell application \"System Events\"\nset procs to name of every process\nif \"qlmanage\" is in procs then\nset frontmost of process \"qlmanage\" to true\nreturn \"ok\"\nend if\nreturn \"wait\"\nend tell")
+                                        .output();
+                                    if let Ok(o) = out {
+                                        if String::from_utf8_lossy(&o.stdout).trim() == "ok" { break; }
+                                    }
+                                }
+                            });
                         }
                     }
                     KeyCode::Char(' ') | KeyCode::Char(',') if app.select_mode => {

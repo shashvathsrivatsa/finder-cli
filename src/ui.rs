@@ -70,6 +70,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     } else if app.is_downloading {
         let pct = app.ytdlp_progress.as_ref().map(|p| p.load(std::sync::atomic::Ordering::Relaxed));
         let label = match pct {
+            Some(p) if p == 100 => "Merging outputs...".to_string(),
             Some(p) if p != u64::MAX => format!("Downloading... {}%", p),
             _ => "Downloading...".to_string(),
         };
@@ -147,7 +148,11 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     let status_height: u16 = if app.ytdlp.is_some() {
         match &app.ytdlp {
-            Some(YtdlpState::FormatPicker { formats, .. }) => ytdlp_format_height(formats.len(), full_area.width as usize) as u16,
+            Some(YtdlpState::FormatPicker { video, audio, .. }) => {
+                // 2 rows (video + audio) each potentially wrapping
+                let w = full_area.width as usize;
+                (ytdlp_row_height(video.len(), w) + ytdlp_row_height(audio.len(), w)) as u16
+            }
             _ => 1,
         }
     } else if app.converting.is_some() {
@@ -187,8 +192,10 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                 ];
                 frame.render_widget(Paragraph::new(Line::from(spans)), status_area);
             }
-            YtdlpState::FormatPicker { formats, selected, .. } => {
-                let lines = ytdlp_format_lines(formats, *selected, status_area.width as usize);
+            YtdlpState::FormatPicker { video, audio, section, selected, .. } => {
+                let w = status_area.width as usize;
+                let mut lines = ytdlp_section_lines("video", video, if *section == 0 { Some(*selected) } else { None }, w, true);
+                lines.extend(ytdlp_section_lines("audio", audio, if *section == 1 { Some(*selected) } else { None }, w, false));
                 frame.render_widget(Paragraph::new(lines), status_area);
             }
         }
@@ -548,16 +555,27 @@ fn convert_bar_height(cs: &ConvertState, width: usize) -> usize {
     convert_bar_lines(cs, width).len().max(1)
 }
 
-fn ytdlp_format_lines(formats: &[crate::app::DynYtFormat], selected: usize, width: usize) -> Vec<Line<'static>> {
-    let prefix = "yt-dlp  quality  →  ";
+fn ytdlp_section_lines(section_label: &str, formats: &[crate::app::DynYtFormat], selected: Option<usize>, width: usize, is_first: bool) -> Vec<Line<'static>> {
+    let ytdlp_label = "yt-dlp  ";
+    let ytdlp_blank = " ".repeat(ytdlp_label.len());
+    let prefix = format!("{}{}  →  ", ytdlp_label, section_label);
     let prefix_len = prefix.chars().count();
     let indent = " ".repeat(prefix_len);
+    let pill_active_bg = Color::Rgb(255, 100, 180);
+    let pill_inactive_fg = Color::Rgb(200, 80, 140);
+
     let mut lines: Vec<Line<'static>> = Vec::new();
+    let leader = if is_first {
+        Span::styled(ytdlp_label, Style::default().fg(Color::Rgb(255, 100, 180)).add_modifier(Modifier::BOLD))
+    } else {
+        Span::raw(ytdlp_blank)
+    };
     let mut current: Vec<Span<'static>> = vec![
-        Span::styled("yt-dlp  ", Style::default().fg(Color::Rgb(255, 100, 180)).add_modifier(Modifier::BOLD)),
-        Span::styled("quality  →  ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+        leader,
+        Span::styled(format!("{}  →  ", section_label), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
     ];
     let mut remaining = width.saturating_sub(prefix_len);
+
     for (i, fmt) in formats.iter().enumerate() {
         let w = fmt.label.len() + 4;
         if current.len() > 2 && w > remaining {
@@ -565,12 +583,12 @@ fn ytdlp_format_lines(formats: &[crate::app::DynYtFormat], selected: usize, widt
             remaining = width.saturating_sub(prefix_len);
         }
         let label = fmt.label.clone();
-        if i == selected {
+        if selected == Some(i) {
             current.push(Span::styled(format!(" {} ", label),
-                Style::default().fg(Color::Black).bg(Color::Rgb(255, 100, 180)).add_modifier(Modifier::BOLD)));
+                Style::default().fg(Color::Black).bg(pill_active_bg).add_modifier(Modifier::BOLD)));
         } else {
             current.push(Span::styled(format!(" {} ", label),
-                Style::default().fg(Color::Rgb(200, 80, 140))));
+                Style::default().fg(pill_inactive_fg)));
         }
         current.push(Span::raw("  "));
         remaining = remaining.saturating_sub(w);
@@ -579,9 +597,9 @@ fn ytdlp_format_lines(formats: &[crate::app::DynYtFormat], selected: usize, widt
     lines
 }
 
-fn ytdlp_format_height(n_formats: usize, width: usize) -> usize {
+fn ytdlp_row_height(n_formats: usize, width: usize) -> usize {
     let dummy: Vec<crate::app::DynYtFormat> = (0..n_formats).map(|_| crate::app::DynYtFormat {
         label: "xxx".to_string(), format_arg: String::new(), extra_args: vec![],
     }).collect();
-    ytdlp_format_lines(&dummy, 0, width).len().max(1)
+    ytdlp_section_lines("video", &dummy, None, width, true).len().max(1)
 }
