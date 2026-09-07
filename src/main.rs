@@ -69,14 +69,14 @@ fn count_files(path: &Path) -> usize {
 }
 
 fn delete_recursive(path: &Path, progress: &Arc<AtomicUsize>) {
-    if path.is_dir() {
+    if path.is_symlink() || !path.is_dir() {
+        let _ = std::fs::remove_file(path);
+        progress.fetch_add(1, Ordering::Relaxed);
+    } else {
         if let Ok(rd) = std::fs::read_dir(path) {
             for e in rd.flatten() { delete_recursive(&e.path(), progress); }
         }
         let _ = std::fs::remove_dir(path);
-    } else {
-        let _ = std::fs::remove_file(path);
-        progress.fetch_add(1, Ordering::Relaxed);
     }
 }
 
