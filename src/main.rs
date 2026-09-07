@@ -339,7 +339,7 @@ fn main() -> io::Result<()> {
                         KeyCode::Char('y') => {
                             app.confirming_delete = None;
                             let paths = std::mem::take(&mut app.pending_deletes);
-                            if paths.len() == 1 {
+                            if paths.len() == 1 && paths[0].is_file() {
                                 let noop = Arc::new(AtomicUsize::new(0));
                                 delete_recursive(&paths[0], &noop);
                                 app.selection.clear(); app.selection_anchor = None; app.select_mode = false;
@@ -782,7 +782,7 @@ fn main() -> io::Result<()> {
                         if let Some(ref cb) = app.clipboard.clone() {
                             let dest_dir = app.columns[app.active_col].path.clone();
                             let is_cut = cb.op == ClipboardOp::Cut;
-                            if cb.paths.len() == 1 {
+                            if cb.paths.len() == 1 && cb.paths[0].is_file() {
                                 let src = &cb.paths[0];
                                 if let Some(filename) = src.file_name() {
                                     let noop = Arc::new(AtomicUsize::new(0));
