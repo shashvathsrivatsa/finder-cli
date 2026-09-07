@@ -36,6 +36,9 @@ pub struct PaneInfo {
     pub same_session: bool,
 }
 
+#[derive(Clone, Copy, PartialEq)]
+pub enum PreviewMode { Long, Short, Name }
+
 pub struct App {
     pub columns: Vec<Column>,
     pub active_col: usize,
@@ -55,6 +58,7 @@ pub struct App {
     pub preview_path: Option<PathBuf>,           // path the preview was computed for
     pub preview_size: Option<Arc<AtomicU64>>,   // u64::MAX = still computing, else bytes
     pub preview_modified: Option<Arc<AtomicI64>>, // i64::MIN = computing, else unix secs
+    pub preview_created: Option<Arc<AtomicI64>>,  // i64::MIN = computing, -1 = unavailable, else unix secs
     pub preview_count: Option<Arc<AtomicI64>>,    // i64::MIN = computing, -1 = not a dir, else count
     pub clipboard: Option<ClipboardEntry>,
     pub focused: bool,
@@ -66,7 +70,7 @@ pub struct App {
     pub goto_query: Option<String>,
     pub selection: HashSet<PathBuf>,
     pub selection_anchor: Option<usize>, // row of last space-toggled entry
-    pub long_preview: bool,
+    pub preview_mode: PreviewMode,
 }
 
 impl App {
@@ -91,6 +95,7 @@ impl App {
             preview_path: None,
             preview_size: None,
             preview_modified: None,
+            preview_created: None,
             preview_count: None,
             clipboard: None,
             focused: true,
@@ -102,7 +107,7 @@ impl App {
             goto_query: None,
             selection: HashSet::new(),
             selection_anchor: None,
-            long_preview: true,
+            preview_mode: PreviewMode::Short,
         };
         app.maybe_push_child_column();
         app

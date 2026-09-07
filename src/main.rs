@@ -302,20 +302,28 @@ fn main() -> io::Result<()> {
                 app.preview_path = Some(path.clone());
                 let size_cell = Arc::new(AtomicU64::new(u64::MAX));
                 let modified_cell = Arc::new(AtomicI64::new(i64::MIN));
+                let created_cell = Arc::new(AtomicI64::new(i64::MIN));
                 let count_cell = Arc::new(AtomicI64::new(i64::MIN));
                 app.preview_size = Some(size_cell.clone());
                 app.preview_modified = Some(modified_cell.clone());
+                app.preview_created = Some(created_cell.clone());
                 app.preview_count = Some(count_cell.clone());
                 std::thread::spawn(move || {
                     let size = dir_size(&path);
                     size_cell.store(size, Ordering::Relaxed);
-                    let modified = path.symlink_metadata()
-                        .and_then(|m| m.modified())
-                        .ok()
+                    let meta = path.symlink_metadata().ok();
+                    let modified = meta.as_ref()
+                        .and_then(|m| m.modified().ok())
                         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                         .map(|d| d.as_secs() as i64)
                         .unwrap_or(-1);
                     modified_cell.store(modified, Ordering::Relaxed);
+                    let created = meta.as_ref()
+                        .and_then(|m| m.created().ok())
+                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map(|d| d.as_secs() as i64)
+                        .unwrap_or(-1);
+                    created_cell.store(created, Ordering::Relaxed);
                     let count = if path.is_dir() {
                         std::fs::read_dir(&path).map(|rd| rd.flatten().count() as i64).unwrap_or(-1)
                     } else { -1 };
@@ -328,6 +336,7 @@ fn main() -> io::Result<()> {
             app.preview_path = None;
             app.preview_size = None;
             app.preview_modified = None;
+            app.preview_created = None;
             app.preview_count = None;
         }
 
@@ -336,6 +345,10 @@ fn main() -> io::Result<()> {
         let bg_active = app.bg_done_rx.is_some();
         let preview_pending = app.preview_size.as_ref()
             .map_or(false, |s| s.load(Ordering::Relaxed) == u64::MAX);
+        if preview_pending && !bg_active {
+            app.spinner_frame = app.spinner_frame.wrapping_add(1);
+            needs_redraw = true;
+        }
         let poll_ms: u64 = if flash_active || bg_active || preview_pending { 80 }
             else if inactive_ms < wait_to_load_preview { (wait_to_load_preview - inactive_ms).min(100) as u64 }
             else { 100 };
@@ -839,7 +852,12 @@ fn main() -> io::Result<()> {
                     }
 
                     KeyCode::Char('x') => {
-                        app.long_preview = !app.long_preview;
+                        use app::PreviewMode;
+                        app.preview_mode = match app.preview_mode {
+                            PreviewMode::Short => PreviewMode::Long,
+                            PreviewMode::Long  => PreviewMode::Name,
+                            PreviewMode::Name  => PreviewMode::Short,
+                        };
                     }
                     KeyCode::Tab => {
                         app.pending_g = false;

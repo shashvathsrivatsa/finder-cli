@@ -8,28 +8,39 @@ use ratatui::{
 
 use chrono::{DateTime, Local, Datelike, Timelike};
 
-use crate::app::{App, ClipboardOp, PaneInfo, CLIPBOARD_FLASH_MS, PREVIEW_DELAY_MS};
+use crate::app::{App, ClipboardOp, PaneInfo, PreviewMode, CLIPBOARD_FLASH_MS};
 
 fn format_size(bytes: u64) -> String {
     const K: u64 = 1024;
     const M: u64 = K * 1024;
     const G: u64 = M * 1024;
-    if bytes >= G      { format!("{:.1} GB", bytes as f64 / G as f64) }
-    else if bytes >= M { format!("{:.1} MB", bytes as f64 / M as f64) }
-    else if bytes >= K { format!("{:.1} KB", bytes as f64 / K as f64) }
-    else               { format!("{} B", bytes) }
+    if bytes >= G      { format!("{:.1}G", bytes as f64 / G as f64) }
+    else if bytes >= M { format!("{:.1}M", bytes as f64 / M as f64) }
+    else if bytes >= K { format!("{:.1}K", bytes as f64 / K as f64) }
+    else               { format!("{}B", bytes) }
+}
+
+fn format_ts(secs: i64) -> Option<String> {
+    let dt: DateTime<Local> = DateTime::from_timestamp(secs, 0)?.with_timezone(&Local);
+    let now = Local::now();
+    let ap = |pm: bool| if pm { "p" } else { "a" };
+    let s = if dt.year() != now.year() {
+        let (pm, h) = dt.hour12();
+        format!("{}/{}/{} {}:{:02}{}", dt.month(), dt.day(), dt.year(), h, dt.minute(), ap(pm))
+    } else if dt.month() == now.month() && dt.day() == now.day() {
+        let (pm, h) = dt.hour12();
+        format!("{}:{:02}{}", h, dt.minute(), ap(pm))
+    } else {
+        let (pm, h) = dt.hour12();
+        format!("{}/{} {}:{:02}{}", dt.month(), dt.day(), h, dt.minute(), ap(pm))
+    };
+    Some(s)
 }
 
 pub fn render(frame: &mut Frame, app: &mut App) {
     let full_area = frame.area();
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(0), Constraint::Length(1)])
-        .split(full_area);
-    let area = chunks[0];
-    let status_area = chunks[1];
 
-    // Always show link icon on the left if a pane is linked
+    // Build left status spans first so we can measure their width
     let link_prefix: Vec<Span> = if app.linked_pane.is_some() {
         vec![Span::styled(" \u{F0C1} ", Style::default().fg(Color::Rgb(100, 180, 255)))]
     } else {
@@ -108,71 +119,99 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         } else { None }
     } else { None };
 
-    if !link_prefix.is_empty() || status_spans.is_some() {
+    // Status takes priority — when active, hide preview entirely.
+    // Name mode expands the bar height; short/long stay at 1 line.
+    let showing_status = !link_prefix.is_empty() || status_spans.is_some();
+
+    let status_height: u16 = if !showing_status && app.preview_mode == PreviewMode::Name {
+        let col = &app.columns[app.active_col];
+        let name = col.grouped.entry_at_row(col.selected_row)
+            .map(|e| e.name.as_str())
+            .unwrap_or("");
+        let w = full_area.width.max(1) as usize;
+        let max_lines = (full_area.height / 2).max(1);
+        let lines_needed = ((name.len() + w - 1) / w).max(1) as u16;
+        lines_needed.min(max_lines)
+    } else { 1 };
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(0), Constraint::Length(status_height)])
+        .split(full_area);
+    let area = chunks[0];
+    let status_area = chunks[1];
+
+    if showing_status {
         let mut spans = link_prefix;
         if let Some(s) = status_spans { spans.extend(s); }
         frame.render_widget(Paragraph::new(Line::from(spans)), status_area);
-    }
-
-    // Right-aligned preview info — split status_area so it doesn't overwrite left colors
-    let preview_text = if app.last_key_at.elapsed().as_millis() >= PREVIEW_DELAY_MS {
-        let ready = |cell: &Option<std::sync::Arc<std::sync::atomic::AtomicI64>>| -> Option<i64> {
-            cell.as_ref().and_then(|c| {
-                let v = c.load(std::sync::atomic::Ordering::Relaxed);
-                if v == i64::MIN { None } else { Some(v) }
-            })
-        };
-
-        let size_str = match &app.preview_size {
-            None => None,
-            Some(cell) => {
-                let v = cell.load(std::sync::atomic::Ordering::Relaxed);
-                if v == u64::MAX { None } else { Some(format_size(v)) }
+    } else {
+        // No active status — show preview
+        let preview_spans: Option<Vec<Span>> = match app.preview_mode {
+            PreviewMode::Name => {
+                let col = &app.columns[app.active_col];
+                let name = col.grouped.entry_at_row(col.selected_row)
+                    .map(|e| e.name.clone())
+                    .unwrap_or_default();
+                let w = status_area.width.max(1) as usize;
+                let max_chars = w * status_area.height as usize;
+                let display = if name.len() <= max_chars {
+                    name
+                } else {
+                    let mut s = name[..max_chars.saturating_sub(3)].to_string();
+                    s.push_str("...");
+                    s
+                };
+                let lines: Vec<Line> = display.as_bytes().chunks(w)
+                    .map(|c| Line::from(Span::styled(
+                        String::from_utf8_lossy(c).into_owned(),
+                        Style::default().fg(Color::DarkGray),
+                    )))
+                    .collect();
+                frame.render_widget(Paragraph::new(lines), status_area);
+                None
+            }
+            PreviewMode::Short | PreviewMode::Long => {
+                {
+                    let ready = |cell: &Option<std::sync::Arc<std::sync::atomic::AtomicI64>>| -> Option<i64> {
+                        cell.as_ref().and_then(|c| {
+                            let v = c.load(std::sync::atomic::Ordering::Relaxed);
+                            if v == i64::MIN { None } else { Some(v) }
+                        })
+                    };
+                    let size_str = app.preview_size.as_ref().and_then(|cell| {
+                        let v = cell.load(std::sync::atomic::Ordering::Relaxed);
+                        if v == u64::MAX { None } else { Some(format!("size: {}", format_size(v))) }
+                    });
+                    let modified_str = ready(&app.preview_modified)
+                        .and_then(|s| if s < 0 { None } else { format_ts(s) })
+                        .map(|s| format!("modified: {}", s));
+                    let created_str = ready(&app.preview_created)
+                        .and_then(|s| if s < 0 { None } else { format_ts(s) })
+                        .map(|s| format!("created: {}", s));
+                    let count_str = ready(&app.preview_count).and_then(|c| {
+                        if c >= 0 { Some(format!("items: {}", c)) } else { None }
+                    });
+                    let parts: Vec<String> = if app.preview_mode == PreviewMode::Long {
+                        [size_str, modified_str, created_str, count_str].into_iter().flatten().collect()
+                    } else {
+                        // Short: just the raw size without label
+                        app.preview_size.as_ref().and_then(|cell| {
+                            let v = cell.load(std::sync::atomic::Ordering::Relaxed);
+                            if v == u64::MAX { None } else { Some(vec![format_size(v)]) }
+                        }).unwrap_or_default()
+                    };
+                    let text = if parts.is_empty() {
+                        format!("{} Scanning...", spinner_ch)
+                    } else { parts.join("  ") };
+                    Some(vec![Span::styled(text, Style::default().fg(Color::DarkGray))])
+                }
             }
         };
-
-        let count_str = ready(&app.preview_count).and_then(|c| {
-            if c >= 0 { Some(format!("{} items", c)) } else { None }
-        });
-
-        let modified_str = ready(&app.preview_modified).and_then(|secs| {
-            if secs < 0 { return None; }
-            let dt: DateTime<Local> = DateTime::from_timestamp(secs, 0)?.with_timezone(&Local);
-            let now = Local::now();
-            let s = if dt.year() != now.year() {
-                format!("{}/{}/{}", dt.month(), dt.day(), dt.year())
-            } else if dt.month() == now.month() && dt.day() == now.day() {
-                let (pm, h12) = dt.hour12();
-                format!("{}:{:02} {}", h12, dt.minute(), if pm { "PM" } else { "AM" })
-            } else {
-                let month = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
-                    [(dt.month0()) as usize];
-                let (pm, h12) = dt.hour12();
-                format!("{} {} {}:{:02} {}", month, dt.day(), h12, dt.minute(), if pm { "PM" } else { "AM" })
-            };
-            Some(s)
-        });
-
-        let parts: Vec<String> = if app.long_preview {
-            [count_str, modified_str, size_str].into_iter().flatten().collect()
-        } else {
-            [size_str].into_iter().flatten().collect()
-        };
-        if parts.is_empty() { "--".to_string() } else { parts.join("  ") }
-    } else {
-        "--".to_string()
-    };
-    let preview_width = preview_text.len() as u16;
-    let right_area = Rect {
-        x: status_area.x + status_area.width.saturating_sub(preview_width),
-        y: status_area.y,
-        width: preview_width.min(status_area.width),
-        height: 1,
-    };
-    frame.render_widget(
-        Paragraph::new(preview_text).style(Style::default().fg(Color::DarkGray)),
-        right_area,
-    );
+        if let Some(spans) = preview_spans {
+            frame.render_widget(Paragraph::new(Line::from(spans)), status_area);
+        }
+    }
 
     let num_cols = app.columns.len();
 
