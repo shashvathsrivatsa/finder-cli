@@ -40,15 +40,16 @@ impl GroupedEntries {
         let mut doc_indices:      Vec<usize> = Vec::new();
         let mut font_indices:     Vec<usize> = Vec::new();
         let mut security_indices: Vec<usize> = Vec::new();
-        let mut network_indices:  Vec<usize> = Vec::new();
-        let mut other_indices:    Vec<usize> = Vec::new();
+        let mut network_indices:    Vec<usize> = Vec::new();
+        let mut compressed_indices: Vec<usize> = Vec::new();
+        let mut other_indices:      Vec<usize> = Vec::new();
 
         for (i, e) in entries.iter().enumerate() {
             if e.is_dir {
                 folder_indices.push(i);
             } else {
-                let ext = e.path.extension().and_then(|s| s.to_str()).unwrap_or("");
-                match group_label(ext) {
+                let ext_owned = e.path.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
+                match group_label(&ext_owned) {
                     "Developer" => dev_indices.push(i),
                     "Config"    => config_indices.push(i),
                     "Scripts"   => script_indices.push(i),
@@ -59,7 +60,8 @@ impl GroupedEntries {
                     "Documents" => doc_indices.push(i),
                     "Fonts"     => font_indices.push(i),
                     "Security"  => security_indices.push(i),
-                    "Network"   => network_indices.push(i),
+                    "Network"     => network_indices.push(i),
+                    "Compressed"  => compressed_indices.push(i),
                     _ if e.is_executable => exec_indices.push(i),
                     _           => other_indices.push(i),
                 }
@@ -81,6 +83,7 @@ impl GroupedEntries {
             ("Fonts",       font_indices),
             ("Security",    security_indices),
             ("Network",     network_indices),
+            ("Compressed",  compressed_indices),
             ("Other",       other_indices),
         ] {
             if !idxs.is_empty() {

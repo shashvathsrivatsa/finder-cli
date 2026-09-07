@@ -65,6 +65,9 @@ const TERRAFORM: &str = "\u{E69A}";
 const FONT:      &str = "\u{F031}";
 const KEY:       &str = "\u{F805}";
 const CSV:       &str = "\u{F1C3}";
+const WORD:      &str = "\u{F1C2}";
+const EXCEL:     &str = "\u{F1C3}";
+const POWERPOINT:&str = "\u{F1C4}";
 const NETWORK:   &str = "\u{F0AC}";
 const JAC:       &str = "\u{2B22}";
 const SHADER:    &str = "\u{F1B2}";
@@ -82,7 +85,8 @@ pub fn icon_for_name(name: &str) -> (&'static str, Color) {
         _ => {}
     }
 
-    let ext = std::path::Path::new(name).extension().and_then(|s| s.to_str()).unwrap_or("");
+    let ext_owned = std::path::Path::new(name).extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
+    let ext = ext_owned.as_str();
     match ext {
         "rs"                              => (RUST,      Color::Rgb(222, 165, 132)),
         "js" | "mjs" | "cjs"             => (JS,        Color::Rgb(240, 214,  83)),
@@ -117,20 +121,26 @@ pub fn icon_for_name(name: &str) -> (&'static str, Color) {
         "sql"                             => (SQL,       Color::Rgb(255, 160, 122)),
         "har"                             => (NETWORK,   Color::Rgb( 99, 179, 237)),
         "csv"                             => (CSV,       Color::Rgb( 33, 150,  83)),
+        "doc" | "docx" | "odt" | "rtf"   => (WORD,       Color::Rgb( 43, 116, 184)),
+        "xls" | "xlsx" | "ods"           => (EXCEL,      Color::Rgb( 33, 115,  70)),
+        "ppt" | "pptx" | "odp"           => (POWERPOINT, Color::Rgb(200,  80,  50)),
         "txt"                             => (TEXT,      Color::Rgb(187, 187, 187)),
         "ttf" | "otf" | "woff" | "woff2" => (FONT,      Color::Rgb(200, 160, 255)),
         "pem" | "key" | "crt" | "cert"
         | "p12" | "pfx" | "ca-bundle"    => (KEY,       Color::Rgb(255, 200,  50)),
         "png" | "jpg" | "jpeg" | "gif"
         | "webp" | "bmp" | "tiff" | "ico"
-        | "svg"                           => (IMAGE,     Color::Rgb(167, 215,  97)),
+        | "svg" | "heic" | "heif" | "avif" => (IMAGE,   Color::Rgb(167, 215,  97)),
         "mp4" | "mov" | "avi" | "mkv"
         | "webm"                          => (VIDEO,     Color::Rgb(253, 199,   0)),
         "mp3" | "wav" | "flac" | "aac"
         | "ogg"                           => (AUDIO,     Color::Rgb(  0, 188, 212)),
         "pdf"                             => (PDF,       Color::Rgb(236,  56,  50)),
-        "zip" | "tar" | "gz" | "bz2"
-        | "xz" | "7z"                     => (ARCHIVE,   Color::Rgb(240, 214,  83)),
+        "zip" | "tar" | "gz" | "tgz" | "bz2" | "tbz" | "tbz2"
+        | "xz" | "txz" | "7z" | "rar" | "zst" | "zstd"
+        | "lz" | "lzma" | "lz4" | "cab" | "iso" | "dmg"
+        | "pkg" | "deb" | "rpm" | "apk" | "jar" | "war" | "ear"
+        | "crx" | "xpi"                   => (ARCHIVE,   Color::Rgb(240, 214,  83)),
         "lock"                            => (LOCK,      Color::Rgb(183, 183, 183)),
         "o"                               => (BINARY,    Color::Rgb(150, 120,  80)),
         "d"                               => (BINARY,    Color::Rgb(100, 100,  80)),
@@ -168,8 +178,13 @@ pub fn group_label(ext: &str) -> &'static str {
         | "xls" | "xlsx" | "ppt" | "pptx"                         => "Documents",
         "o" | "d" | "rlib" | "rmeta" | "so" | "dylib" | "dll"
         | "a" | "wasm" | "pdb" | "map"                            => "Compiled",
+        "zip" | "tar" | "gz" | "tgz" | "bz2" | "tbz" | "tbz2"
+        | "xz" | "txz" | "7z" | "rar" | "zst" | "zstd"
+        | "lz" | "lzma" | "lz4" | "cab" | "iso" | "dmg"
+        | "pkg" | "deb" | "rpm" | "apk" | "jar" | "war" | "ear"
+        | "crx" | "xpi"                                           => "Compressed",
         "png" | "jpg" | "jpeg" | "gif" | "svg" | "ico"
-        | "webp" | "bmp" | "tiff"                                  => "Images",
+        | "webp" | "bmp" | "tiff" | "heic" | "heif" | "avif"      => "Images",
         "mp4" | "mov" | "avi" | "mkv" | "webm"                    => "Video",
         "mp3" | "wav" | "flac" | "aac" | "ogg"                    => "Audio",
         "ttf" | "otf" | "woff" | "woff2"                          => "Fonts",

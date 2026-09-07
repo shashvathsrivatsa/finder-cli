@@ -903,6 +903,14 @@ fn main() -> io::Result<()> {
                         }
                     }
 
+                    KeyCode::Char('r') => {
+                        app.pending_g = false;
+                        app.pending_prefix = None;
+                        let col = &app.columns[app.active_col];
+                        if let Some(e) = col.grouped.entry_at_row(col.selected_row) {
+                            std::process::Command::new("open").arg("-R").arg(&e.path).spawn().ok();
+                        }
+                    }
                     KeyCode::Char('x') => {
                         use app::PreviewMode;
                         app.preview_mode = match app.preview_mode {
