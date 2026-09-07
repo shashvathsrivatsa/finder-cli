@@ -339,22 +339,30 @@ fn main() -> io::Result<()> {
                         KeyCode::Char('y') => {
                             app.confirming_delete = None;
                             let paths = std::mem::take(&mut app.pending_deletes);
-                            app.is_deleting = true;
-                            app.spinner_frame = 0;
-                            let progress = Arc::new(AtomicUsize::new(0));
-                            let total = Arc::new(AtomicUsize::new(0));
-                            app.bg_progress = Some(progress.clone());
-                            app.bg_total = Some(total.clone());
-                            let (tx, rx) = std::sync::mpsc::channel();
-                            app.bg_done_rx = Some(rx);
-                            std::thread::spawn(move || {
-                                let t: usize = paths.iter().map(|p| count_files(p)).sum();
-                                total.store(t, Ordering::Relaxed);
-                                for path in &paths {
-                                    delete_recursive(path, &progress);
-                                }
-                                let _ = tx.send(());
-                            });
+                            if paths.len() == 1 {
+                                let noop = Arc::new(AtomicUsize::new(0));
+                                delete_recursive(&paths[0], &noop);
+                                app.selection.clear(); app.selection_anchor = None; app.select_mode = false;
+                                app.refresh();
+                                let col = &mut app.columns[app.active_col];
+                                if col.selected_row >= col.grouped.row_count && col.selected_row > 0 { col.selected_row -= 1; }
+                                app.maybe_push_child_column();
+                            } else {
+                                app.is_deleting = true;
+                                app.spinner_frame = 0;
+                                let progress = Arc::new(AtomicUsize::new(0));
+                                let total = Arc::new(AtomicUsize::new(0));
+                                app.bg_progress = Some(progress.clone());
+                                app.bg_total = Some(total.clone());
+                                let (tx, rx) = std::sync::mpsc::channel();
+                                app.bg_done_rx = Some(rx);
+                                std::thread::spawn(move || {
+                                    let t: usize = paths.iter().map(|p| count_files(p)).sum();
+                                    total.store(t, Ordering::Relaxed);
+                                    for path in &paths { delete_recursive(path, &progress); }
+                                    let _ = tx.send(());
+                                });
+                            }
                         }
                         _ => { app.confirming_delete = None; app.pending_deletes.clear(); }
                     }
@@ -774,28 +782,42 @@ fn main() -> io::Result<()> {
                         if let Some(ref cb) = app.clipboard.clone() {
                             let dest_dir = app.columns[app.active_col].path.clone();
                             let is_cut = cb.op == ClipboardOp::Cut;
-                            app.is_pasting = true;
-                            app.spinner_frame = 0;
-                            let progress = Arc::new(AtomicUsize::new(0));
-                            let total = Arc::new(AtomicUsize::new(0));
-                            app.bg_progress = Some(progress.clone());
-                            app.bg_total = Some(total.clone());
-                            let (tx, rx) = std::sync::mpsc::channel();
-                            app.bg_done_rx = Some(rx);
-                            let cb_clone = cb.clone();
-                            std::thread::spawn(move || {
-                                let t: usize = cb_clone.paths.iter().map(|p| count_files(p)).sum();
-                                total.store(t, Ordering::Relaxed);
-                                for src in &cb_clone.paths {
-                                    if let Some(filename) = src.file_name() {
-                                        let single = ClipboardEntry { op: cb_clone.op.clone(), path: src.clone(), paths: vec![src.clone()], set_at: cb_clone.set_at };
-                                        let dst = unique_dest(&dest_dir, filename, src, is_cut);
-                                        do_paste(&single, &dst, &progress).ok();
-                                    }
+                            if cb.paths.len() == 1 {
+                                let src = &cb.paths[0];
+                                if let Some(filename) = src.file_name() {
+                                    let noop = Arc::new(AtomicUsize::new(0));
+                                    let single = ClipboardEntry { op: cb.op.clone(), path: src.clone(), paths: vec![src.clone()], set_at: cb.set_at };
+                                    let dst = unique_dest(&dest_dir, filename, src, is_cut);
+                                    do_paste(&single, &dst, &noop).ok();
                                 }
-                                let _ = tx.send(());
-                            });
-                            if is_cut { app.clipboard = None; }
+                                if is_cut { app.clipboard = None; }
+                                app.selection.clear(); app.selection_anchor = None; app.select_mode = false;
+                                app.refresh();
+                                app.maybe_push_child_column();
+                            } else {
+                                app.is_pasting = true;
+                                app.spinner_frame = 0;
+                                let progress = Arc::new(AtomicUsize::new(0));
+                                let total = Arc::new(AtomicUsize::new(0));
+                                app.bg_progress = Some(progress.clone());
+                                app.bg_total = Some(total.clone());
+                                let (tx, rx) = std::sync::mpsc::channel();
+                                app.bg_done_rx = Some(rx);
+                                let cb_clone = cb.clone();
+                                std::thread::spawn(move || {
+                                    let t: usize = cb_clone.paths.iter().map(|p| count_files(p)).sum();
+                                    total.store(t, Ordering::Relaxed);
+                                    for src in &cb_clone.paths {
+                                        if let Some(filename) = src.file_name() {
+                                            let single = ClipboardEntry { op: cb_clone.op.clone(), path: src.clone(), paths: vec![src.clone()], set_at: cb_clone.set_at };
+                                            let dst = unique_dest(&dest_dir, filename, src, is_cut);
+                                            do_paste(&single, &dst, &progress).ok();
+                                        }
+                                    }
+                                    let _ = tx.send(());
+                                });
+                                if is_cut { app.clipboard = None; }
+                            }
                         }
                     }
                     KeyCode::Char('x') => {

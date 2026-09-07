@@ -1,6 +1,6 @@
 use ratatui::{
     Frame,
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Clear, List, ListItem, Paragraph},
@@ -112,25 +112,28 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         frame.render_widget(Paragraph::new(Line::from(spans)), status_area);
     }
 
-    // Right-aligned preview info
+    // Right-aligned preview info — split status_area so it doesn't overwrite left colors
     let preview_text = if app.last_key_at.elapsed().as_millis() >= PREVIEW_DELAY_MS {
         match &app.preview_size {
             None => "--".to_string(),
             Some(cell) => {
                 let v = cell.load(std::sync::atomic::Ordering::Relaxed);
-                if v == u64::MAX {
-                    "--".to_string()
-                } else {
-                    format_size(v)
-                }
+                if v == u64::MAX { "--".to_string() } else { format_size(v) }
             }
         }
     } else {
         "--".to_string()
     };
+    let preview_width = preview_text.len() as u16;
+    let right_area = Rect {
+        x: status_area.x + status_area.width.saturating_sub(preview_width),
+        y: status_area.y,
+        width: preview_width.min(status_area.width),
+        height: 1,
+    };
     frame.render_widget(
-        Paragraph::new(preview_text).style(Style::default().fg(Color::DarkGray)).alignment(Alignment::Right),
-        status_area,
+        Paragraph::new(preview_text).style(Style::default().fg(Color::DarkGray)),
+        right_area,
     );
 
     let num_cols = app.columns.len();
