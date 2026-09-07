@@ -7,7 +7,7 @@ mod ui;
 
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, atomic::{AtomicU64, AtomicUsize, Ordering}};
+use std::sync::{Arc, atomic::{AtomicI64, AtomicU64, AtomicUsize, Ordering}};
 use std::time::Duration;
 
 use crossterm::{
@@ -301,10 +301,25 @@ fn main() -> io::Result<()> {
                 let path = cur_path.unwrap();
                 app.preview_path = Some(path.clone());
                 let size_cell = Arc::new(AtomicU64::new(u64::MAX));
+                let modified_cell = Arc::new(AtomicI64::new(i64::MIN));
+                let count_cell = Arc::new(AtomicI64::new(i64::MIN));
                 app.preview_size = Some(size_cell.clone());
+                app.preview_modified = Some(modified_cell.clone());
+                app.preview_count = Some(count_cell.clone());
                 std::thread::spawn(move || {
                     let size = dir_size(&path);
                     size_cell.store(size, Ordering::Relaxed);
+                    let modified = path.symlink_metadata()
+                        .and_then(|m| m.modified())
+                        .ok()
+                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map(|d| d.as_secs() as i64)
+                        .unwrap_or(-1);
+                    modified_cell.store(modified, Ordering::Relaxed);
+                    let count = if path.is_dir() {
+                        std::fs::read_dir(&path).map(|rd| rd.flatten().count() as i64).unwrap_or(-1)
+                    } else { -1 };
+                    count_cell.store(count, Ordering::Relaxed);
                 });
                 needs_redraw = true;
             }
@@ -312,6 +327,8 @@ fn main() -> io::Result<()> {
             // While active, clear stale preview so it recomputes on next idle
             app.preview_path = None;
             app.preview_size = None;
+            app.preview_modified = None;
+            app.preview_count = None;
         }
 
         let flash_active = app.clipboard.as_ref()
@@ -820,13 +837,9 @@ fn main() -> io::Result<()> {
                             }
                         }
                     }
+
                     KeyCode::Char('x') => {
-                        app.pending_g = false;
-                        app.pending_prefix = None;
-                        let col = &app.columns[app.active_col];
-                        if let Some(e) = col.grouped.entry_at_row(col.selected_row) {
-                            std::process::Command::new("open").arg(&e.path).spawn().ok();
-                        }
+                        app.long_preview = !app.long_preview;
                     }
                     KeyCode::Tab => {
                         app.pending_g = false;

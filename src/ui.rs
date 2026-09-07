@@ -6,6 +6,8 @@ use ratatui::{
     widgets::{Block, Clear, List, ListItem, Paragraph},
 };
 
+use chrono::{DateTime, Local, Datelike, Timelike};
+
 use crate::app::{App, ClipboardOp, PaneInfo, CLIPBOARD_FLASH_MS, PREVIEW_DELAY_MS};
 
 fn format_size(bytes: u64) -> String {
@@ -114,13 +116,49 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     // Right-aligned preview info — split status_area so it doesn't overwrite left colors
     let preview_text = if app.last_key_at.elapsed().as_millis() >= PREVIEW_DELAY_MS {
-        match &app.preview_size {
-            None => "--".to_string(),
+        let ready = |cell: &Option<std::sync::Arc<std::sync::atomic::AtomicI64>>| -> Option<i64> {
+            cell.as_ref().and_then(|c| {
+                let v = c.load(std::sync::atomic::Ordering::Relaxed);
+                if v == i64::MIN { None } else { Some(v) }
+            })
+        };
+
+        let size_str = match &app.preview_size {
+            None => None,
             Some(cell) => {
                 let v = cell.load(std::sync::atomic::Ordering::Relaxed);
-                if v == u64::MAX { "--".to_string() } else { format_size(v) }
+                if v == u64::MAX { None } else { Some(format_size(v)) }
             }
-        }
+        };
+
+        let count_str = ready(&app.preview_count).and_then(|c| {
+            if c >= 0 { Some(format!("{} items", c)) } else { None }
+        });
+
+        let modified_str = ready(&app.preview_modified).and_then(|secs| {
+            if secs < 0 { return None; }
+            let dt: DateTime<Local> = DateTime::from_timestamp(secs, 0)?.with_timezone(&Local);
+            let now = Local::now();
+            let s = if dt.year() != now.year() {
+                format!("{}/{}/{}", dt.month(), dt.day(), dt.year())
+            } else if dt.month() == now.month() && dt.day() == now.day() {
+                let (pm, h12) = dt.hour12();
+                format!("{}:{:02} {}", h12, dt.minute(), if pm { "PM" } else { "AM" })
+            } else {
+                let month = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
+                    [(dt.month0()) as usize];
+                let (pm, h12) = dt.hour12();
+                format!("{} {} {}:{:02} {}", month, dt.day(), h12, dt.minute(), if pm { "PM" } else { "AM" })
+            };
+            Some(s)
+        });
+
+        let parts: Vec<String> = if app.long_preview {
+            [count_str, modified_str, size_str].into_iter().flatten().collect()
+        } else {
+            [size_str].into_iter().flatten().collect()
+        };
+        if parts.is_empty() { "--".to_string() } else { parts.join("  ") }
     } else {
         "--".to_string()
     };

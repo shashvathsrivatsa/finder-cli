@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::{Arc, atomic::AtomicU64};
+use std::sync::{Arc, atomic::{AtomicI64, AtomicU64}};
 use std::time::Instant;
 
 use crate::column::Column;
@@ -52,8 +52,10 @@ pub struct App {
     pub bg_progress: Option<std::sync::Arc<std::sync::atomic::AtomicUsize>>,
     pub bg_total: Option<std::sync::Arc<std::sync::atomic::AtomicUsize>>,
     pub last_key_at: Instant,
-    pub preview_path: Option<PathBuf>,          // path the preview was computed for
+    pub preview_path: Option<PathBuf>,           // path the preview was computed for
     pub preview_size: Option<Arc<AtomicU64>>,   // u64::MAX = still computing, else bytes
+    pub preview_modified: Option<Arc<AtomicI64>>, // i64::MIN = computing, else unix secs
+    pub preview_count: Option<Arc<AtomicI64>>,    // i64::MIN = computing, -1 = not a dir, else count
     pub clipboard: Option<ClipboardEntry>,
     pub focused: bool,
     pub linked_pane: Option<PaneInfo>,
@@ -64,6 +66,7 @@ pub struct App {
     pub goto_query: Option<String>,
     pub selection: HashSet<PathBuf>,
     pub selection_anchor: Option<usize>, // row of last space-toggled entry
+    pub long_preview: bool,
 }
 
 impl App {
@@ -87,6 +90,8 @@ impl App {
             last_key_at: Instant::now(),
             preview_path: None,
             preview_size: None,
+            preview_modified: None,
+            preview_count: None,
             clipboard: None,
             focused: true,
             linked_pane: None,
@@ -97,6 +102,7 @@ impl App {
             goto_query: None,
             selection: HashSet::new(),
             selection_anchor: None,
+            long_preview: true,
         };
         app.maybe_push_child_column();
         app
