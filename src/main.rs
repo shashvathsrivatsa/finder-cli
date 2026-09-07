@@ -7,7 +7,7 @@ mod ui;
 
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
+use std::sync::{Arc, atomic::{AtomicU64, AtomicUsize, Ordering}};
 use std::time::Duration;
 
 use crossterm::{
@@ -49,6 +49,17 @@ fn copy_dir(src: &Path, dst: &Path, progress: &Arc<AtomicUsize>) -> io::Result<(
         }
     }
     Ok(())
+}
+
+fn dir_size(path: &Path) -> u64 {
+    if path.is_symlink() {
+        return path.metadata().map(|m| m.len()).unwrap_or(0);
+    }
+    if path.is_file() {
+        return path.metadata().map(|m| m.len()).unwrap_or(0);
+    }
+    let Ok(rd) = std::fs::read_dir(path) else { return 0; };
+    rd.flatten().map(|e| dir_size(&e.path())).sum()
 }
 
 fn count_files(path: &Path) -> usize {
@@ -279,10 +290,38 @@ fn main() -> io::Result<()> {
             }
         }
 
+        // Trigger preview size computation after 1s of inactivity
+        let inactive_ms = app.last_key_at.elapsed().as_millis();
+        let wait_to_load_preview = app::PREVIEW_DELAY_MS;
+        if inactive_ms >= wait_to_load_preview {
+            let col = &app.columns[app.active_col];
+            let cur_path = col.grouped.entry_at_row(col.selected_row).map(|e| e.path.clone());
+            let needs_preview = cur_path.as_ref().map_or(false, |p| app.preview_path.as_ref() != Some(p));
+            if needs_preview {
+                let path = cur_path.unwrap();
+                app.preview_path = Some(path.clone());
+                let size_cell = Arc::new(AtomicU64::new(u64::MAX));
+                app.preview_size = Some(size_cell.clone());
+                std::thread::spawn(move || {
+                    let size = dir_size(&path);
+                    size_cell.store(size, Ordering::Relaxed);
+                });
+                needs_redraw = true;
+            }
+        } else {
+            // While active, clear stale preview so it recomputes on next idle
+            app.preview_path = None;
+            app.preview_size = None;
+        }
+
         let flash_active = app.clipboard.as_ref()
             .is_some_and(|cb| cb.set_at.elapsed().as_millis() < CLIPBOARD_FLASH_MS as u128 + 50);
         let bg_active = app.bg_done_rx.is_some();
-        let poll_ms = if flash_active || bg_active { 80 } else { 100 };
+        let preview_pending = app.preview_size.as_ref()
+            .map_or(false, |s| s.load(Ordering::Relaxed) == u64::MAX);
+        let poll_ms: u64 = if flash_active || bg_active || preview_pending { 80 }
+            else if inactive_ms < wait_to_load_preview { (wait_to_load_preview - inactive_ms).min(100) as u64 }
+            else { 100 };
         if event::poll(Duration::from_millis(poll_ms))? {
             let ev = event::read()?;
             if matches!(ev, Event::FocusGained) { app.focused = true; needs_redraw = true; continue; }
@@ -292,6 +331,7 @@ fn main() -> io::Result<()> {
                     continue;
                 }
                 needs_redraw = true;
+                app.last_key_at = std::time::Instant::now();
 
                 // Delete confirmation intercepts all keys
                 if app.confirming_delete.is_some() {

@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::sync::{Arc, atomic::AtomicU64};
 use std::time::Instant;
 
 use crate::column::Column;
@@ -10,6 +11,9 @@ use crate::rename::RenameState;
 
 // Tweak this to change how long the "cut/copy: filename" flash shows
 pub const CLIPBOARD_FLASH_MS: u64 = 200;
+
+// Idle delay before preview size loads (ms)
+pub const PREVIEW_DELAY_MS: u128 = 0;
 
 // How many rows Ctrl+D / Ctrl+U jump (half-page feel)
 pub const PAGE_JUMP: usize = 10;
@@ -47,6 +51,9 @@ pub struct App {
     pub bg_done_rx: Option<std::sync::mpsc::Receiver<()>>,
     pub bg_progress: Option<std::sync::Arc<std::sync::atomic::AtomicUsize>>,
     pub bg_total: Option<std::sync::Arc<std::sync::atomic::AtomicUsize>>,
+    pub last_key_at: Instant,
+    pub preview_path: Option<PathBuf>,          // path the preview was computed for
+    pub preview_size: Option<Arc<AtomicU64>>,   // u64::MAX = still computing, else bytes
     pub clipboard: Option<ClipboardEntry>,
     pub focused: bool,
     pub linked_pane: Option<PaneInfo>,
@@ -77,6 +84,9 @@ impl App {
             bg_done_rx: None,
             bg_progress: None,
             bg_total: None,
+            last_key_at: Instant::now(),
+            preview_path: None,
+            preview_size: None,
             clipboard: None,
             focused: true,
             linked_pane: None,

@@ -1,12 +1,22 @@
 use ratatui::{
     Frame,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Clear, List, ListItem, Paragraph},
 };
 
-use crate::app::{App, ClipboardOp, PaneInfo, CLIPBOARD_FLASH_MS};
+use crate::app::{App, ClipboardOp, PaneInfo, CLIPBOARD_FLASH_MS, PREVIEW_DELAY_MS};
+
+fn format_size(bytes: u64) -> String {
+    const K: u64 = 1024;
+    const M: u64 = K * 1024;
+    const G: u64 = M * 1024;
+    if bytes >= G      { format!("{:.1} GB", bytes as f64 / G as f64) }
+    else if bytes >= M { format!("{:.1} MB", bytes as f64 / M as f64) }
+    else if bytes >= K { format!("{:.1} KB", bytes as f64 / K as f64) }
+    else               { format!("{} B", bytes) }
+}
 
 pub fn render(frame: &mut Frame, app: &mut App) {
     let full_area = frame.area();
@@ -101,6 +111,27 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         if let Some(s) = status_spans { spans.extend(s); }
         frame.render_widget(Paragraph::new(Line::from(spans)), status_area);
     }
+
+    // Right-aligned preview info
+    let preview_text = if app.last_key_at.elapsed().as_millis() >= PREVIEW_DELAY_MS {
+        match &app.preview_size {
+            None => "--".to_string(),
+            Some(cell) => {
+                let v = cell.load(std::sync::atomic::Ordering::Relaxed);
+                if v == u64::MAX {
+                    "--".to_string()
+                } else {
+                    format_size(v)
+                }
+            }
+        }
+    } else {
+        "--".to_string()
+    };
+    frame.render_widget(
+        Paragraph::new(preview_text).style(Style::default().fg(Color::DarkGray)).alignment(Alignment::Right),
+        status_area,
+    );
 
     let num_cols = app.columns.len();
 
