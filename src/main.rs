@@ -1029,6 +1029,9 @@ fn main() -> io::Result<()> {
                                             let mut cmd = std::process::Command::new("yt-dlp");
                                             cmd.arg("-f").arg(&format_arg);
                                             for a in &extra { cmd.arg(a); }
+                                            if extra.is_empty() {
+                                                cmd.arg("--merge-output-format").arg("mp4");
+                                            }
                                             cmd.arg("--newline")
                                                .arg("--output").arg("%(title)s.%(ext)s")
                                                .arg(&url)
@@ -1271,6 +1274,19 @@ fn main() -> io::Result<()> {
                                 app.selection.insert(path);
                                 app.selection_anchor = Some(row);
                             }
+                        }
+                    }
+                    KeyCode::Char(' ') if !app.select_mode => {
+                        app.pending_g = false;
+                        app.pending_prefix = None;
+                        let col = &app.columns[app.active_col];
+                        if let Some(e) = col.grouped.entry_at_row(col.selected_row) {
+                            std::process::Command::new("qlmanage")
+                                .arg("-p").arg(&e.path)
+                                .stdin(std::process::Stdio::null())
+                                .stdout(std::process::Stdio::null())
+                                .stderr(std::process::Stdio::null())
+                                .spawn().ok();
                         }
                     }
                     KeyCode::Char(' ') | KeyCode::Char(',') if app.select_mode => {
