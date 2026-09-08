@@ -1519,10 +1519,19 @@ fn main() -> io::Result<()> {
                                     let single = ClipboardEntry { op: cb.op.clone(), path: src.clone(), paths: vec![src.clone()], set_at: cb.set_at };
                                     let dst = unique_dest(&dest_dir, filename, src, is_cut);
                                     do_paste(&single, &dst, &noop).ok();
+                                    if is_cut { app.clipboard = None; }
+                                    app.selection.clear(); app.selection_anchor = None; app.select_mode = false;
+                                    app.refresh();
+                                    let col = &mut app.columns[app.active_col];
+                                    if let Some(row) = col.grouped.row_to_entry.iter().position(|&i| col.grouped.entries[i].path == dst) {
+                                        col.selected_row = row;
+                                        col.sync_list_state();
+                                    }
+                                } else {
+                                    if is_cut { app.clipboard = None; }
+                                    app.selection.clear(); app.selection_anchor = None; app.select_mode = false;
+                                    app.refresh();
                                 }
-                                if is_cut { app.clipboard = None; }
-                                app.selection.clear(); app.selection_anchor = None; app.select_mode = false;
-                                app.refresh();
                                 app.maybe_push_child_column();
                             } else {
                                 app.is_pasting = true;
@@ -1534,6 +1543,8 @@ fn main() -> io::Result<()> {
                                 let (tx, rx) = std::sync::mpsc::channel();
                                 app.bg_done_rx = Some(rx);
                                 let cb_clone = cb.clone();
+                                app.convert_output = cb.paths.first()
+                                    .and_then(|src| src.file_name().map(|f| unique_dest(&dest_dir, f, src, is_cut)));
                                 std::thread::spawn(move || {
                                     let t: usize = cb_clone.paths.iter().map(|p| count_files(p)).sum();
                                     total.store(t, Ordering::Relaxed);
@@ -1563,6 +1574,26 @@ fn main() -> io::Result<()> {
                         app.pending_g = false;
                         app.pending_prefix = None;
                         app.ytdlp = Some(YtdlpState::UrlInput(String::new()));
+                    }
+                    KeyCode::Char('C') => {
+                        app.pending_g = false;
+                        app.pending_prefix = None;
+                        let col = &app.columns[app.active_col];
+                        if let Some(e) = col.grouped.entry_at_row(col.selected_row) {
+                            if let Some(path_str) = e.path.to_str() {
+                                std::process::Command::new("pbcopy")
+                                    .stdin(std::process::Stdio::piped())
+                                    .spawn()
+                                    .ok()
+                                    .and_then(|mut c| {
+                                        use std::io::Write;
+                                        c.stdin.as_mut()?.write_all(format!("'{}'", path_str).as_bytes()).ok()?;
+                                        Some(())
+                                    });
+                                let name = e.path.file_name().and_then(|n| n.to_str()).unwrap_or(path_str);
+                                app.status_flash = Some((format!("path: {}", name), std::time::Instant::now()));
+                            }
+                        }
                     }
                     KeyCode::Char('c') if !app.select_mode && !key.modifiers.contains(KeyModifiers::CONTROL) => {
                         app.pending_g = false;

@@ -121,6 +121,22 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         Some(vec![
             Span::styled("-- VISUAL --", Style::default().fg(Color::Rgb(80, 200, 120)).add_modifier(Modifier::BOLD)),
         ])
+    } else if let Some((ref msg, ref at)) = app.status_flash {
+        let duration_ms = if msg.starts_with("path: ") { CLIPBOARD_FLASH_MS as u128 } else { 3000 };
+        if at.elapsed().as_millis() < duration_ms {
+            let spans = if let Some(rest) = msg.strip_prefix("path: ") {
+                vec![
+                    Span::styled("path: ", Style::default().fg(Color::Rgb(80, 200, 120))),
+                    Span::styled(rest.to_string(), Style::default().fg(Color::DarkGray)),
+                ]
+            } else {
+                vec![Span::styled(msg.clone(), Style::default().fg(Color::Rgb(220, 50, 50)).add_modifier(Modifier::BOLD))]
+            };
+            Some(spans)
+        } else {
+            app.status_flash = None;
+            None
+        }
     } else if let Some(cb) = &app.clipboard {
         if cb.set_at.elapsed().as_millis() < CLIPBOARD_FLASH_MS as u128 {
             let name = cb.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
@@ -133,13 +149,6 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                 Span::styled(name, Style::default().fg(Color::DarkGray)),
             ])
         } else { None }
-    } else if let Some((ref msg, ref at)) = app.status_flash {
-        if at.elapsed().as_secs() < 3 {
-            Some(vec![Span::styled(msg.clone(), Style::default().fg(Color::Rgb(220, 50, 50)).add_modifier(Modifier::BOLD))])
-        } else {
-            app.status_flash = None;
-            None
-        }
     } else { None };
 
     // Status takes priority — when active, hide preview entirely.
