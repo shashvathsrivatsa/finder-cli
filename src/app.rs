@@ -111,6 +111,7 @@ pub struct App {
     pub converting: Option<ConvertState>,
     pub ytdlp: Option<YtdlpState>,
     pub is_downloading: bool,
+    pub is_uploading: bool,
     pub ytdlp_error_rx: Option<std::sync::mpsc::Receiver<Option<String>>>,
     pub ytdlp_progress: Option<Arc<AtomicU64>>, // u64::MAX = unknown, else 0-100
     pub ytdlp_formats_rx: Option<std::sync::mpsc::Receiver<Result<(Vec<DynYtFormat>, Vec<DynYtFormat>), String>>>,
@@ -165,6 +166,7 @@ impl App {
             converting: None,
             ytdlp: None,
             is_downloading: false,
+            is_uploading: false,
             ytdlp_error_rx: None,
             ytdlp_progress: None,
             ytdlp_formats_rx: None,

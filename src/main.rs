@@ -533,6 +533,7 @@ fn main() -> io::Result<()> {
                     app.is_pasting = false;
                     app.is_converting = false;
                     app.is_downloading = false;
+                    app.is_uploading = false;
                     app.selection.clear(); app.selection_anchor = None; app.select_mode = false;
                     app.refresh();
                     if let Some(ref out) = convert_output {
@@ -572,6 +573,7 @@ fn main() -> io::Result<()> {
                     app.is_pasting = false;
                     app.is_converting = false;
                     app.is_downloading = false;
+                    app.is_uploading = false;
                     needs_redraw = true;
                 }
             }
@@ -1574,6 +1576,41 @@ fn main() -> io::Result<()> {
                         app.pending_g = false;
                         app.pending_prefix = None;
                         app.ytdlp = Some(YtdlpState::UrlInput(String::new()));
+                    }
+                    KeyCode::Char('U') => {
+                        app.pending_g = false;
+                        app.pending_prefix = None;
+                        let col = &app.columns[app.active_col];
+                        if let Some(e) = col.grouped.entry_at_row(col.selected_row) {
+                            let path = e.path.clone();
+                            app.is_uploading = true;
+                            app.spinner_frame = 0;
+                            let (tx, rx) = std::sync::mpsc::channel::<()>();
+                            app.bg_done_rx = Some(rx);
+                            std::thread::spawn(move || {
+                                use std::io::Write;
+                                let out = std::process::Command::new("node")
+                                    .arg("/Users/shashvathsrivatsa/Code/typescript/google-drive-port/dist/main.js")
+                                    .arg(&path)
+                                    .output();
+                                if let Ok(o) = out {
+                                    let url = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                                    if url.starts_with("http") {
+                                        if let Ok(mut child) = std::process::Command::new("pbcopy")
+                                            .stdin(std::process::Stdio::piped())
+                                            .spawn()
+                                        {
+                                            if let Some(stdin) = child.stdin.as_mut() {
+                                                let _ = stdin.write_all(url.as_bytes());
+                                            }
+                                            let _ = child.wait();
+                                        }
+                                        std::process::Command::new("open").arg(&url).spawn().ok();
+                                    }
+                                }
+                                let _ = tx.send(());
+                            });
+                        }
                     }
                     KeyCode::Char('C') => {
                         app.pending_g = false;

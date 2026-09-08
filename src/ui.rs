@@ -83,6 +83,11 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             Span::styled(format!("{} ", spinner_ch), Style::default().fg(Color::Rgb(180, 140, 255))),
             Span::styled("Converting...", Style::default().fg(Color::Rgb(180, 140, 255)).add_modifier(Modifier::BOLD)),
         ])
+    } else if app.is_uploading {
+        Some(vec![
+            Span::styled(format!("{} ", spinner_ch), Style::default().fg(Color::Rgb(255, 200, 80))),
+            Span::styled("Uploading...", Style::default().fg(Color::Rgb(255, 200, 80)).add_modifier(Modifier::BOLD)),
+        ])
     } else if app.is_pasting {
         let label = if bg_total > 0 {
             format!("Pasting ({}/{})...", bg_done, bg_total)
