@@ -116,6 +116,10 @@ pub struct App {
     pub ytdlp_progress: Option<Arc<AtomicU64>>, // u64::MAX = unknown, else 0-100
     pub ytdlp_formats_rx: Option<std::sync::mpsc::Receiver<Result<(Vec<DynYtFormat>, Vec<DynYtFormat>), String>>>,
     pub status_flash: Option<(String, std::time::Instant)>,
+    pub shell_input: Option<String>,
+    pub shell_cwd: Option<PathBuf>,
+    pub shell_output_log: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    pub shell_running: std::sync::Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl App {
@@ -171,6 +175,10 @@ impl App {
             ytdlp_progress: None,
             ytdlp_formats_rx: None,
             status_flash: None,
+            shell_input: None,
+            shell_cwd: None,
+            shell_output_log: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            shell_running: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         };
         app.maybe_push_child_column();
         app

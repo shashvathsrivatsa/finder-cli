@@ -52,7 +52,18 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         .map(|t| t.load(std::sync::atomic::Ordering::Relaxed))
         .unwrap_or(0);
 
-    let status_spans: Option<Vec<Span>> = if app.is_deleting {
+    let shell_running = app.shell_running.load(std::sync::atomic::Ordering::Relaxed);
+    let status_spans: Option<Vec<Span>> = if shell_running > 0 {
+        let label = if shell_running > 1 {
+            format!("Running {} commands...", shell_running)
+        } else {
+            "Running...".to_string()
+        };
+        Some(vec![
+            Span::styled(format!("{} ", spinner_ch), Style::default().fg(Color::Rgb(81, 220, 119))),
+            Span::styled(label, Style::default().fg(Color::Rgb(81, 220, 119)).add_modifier(Modifier::BOLD)),
+        ])
+    } else if app.is_deleting {
         let label = if bg_total > 0 {
             format!("Deleting ({}/{})...", bg_done, bg_total)
         } else {
@@ -93,6 +104,12 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             Span::styled(format!("{} ", spinner_ch), Style::default().fg(Color::Rgb(100, 180, 255))),
             Span::styled(label, Style::default().fg(Color::Rgb(100, 180, 255)).add_modifier(Modifier::BOLD)),
         ])
+    } else if let Some(ref cmd) = app.shell_input {
+        Some(vec![
+            Span::styled(":! ", Style::default().fg(Color::Rgb(180, 180, 180)).add_modifier(Modifier::BOLD)),
+            Span::styled(cmd.clone(), Style::default().fg(Color::White)),
+            Span::styled("█", Style::default().fg(Color::Rgb(180, 180, 180))),
+        ])
     } else if let Some(ref q) = app.goto_query {
         Some(vec![
             Span::styled("/", Style::default().fg(Color::Rgb(255, 200, 80)).add_modifier(Modifier::BOLD)),
@@ -112,21 +129,21 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             Span::styled(label, Style::default().fg(Color::Rgb(220, 50, 50))),
             Span::styled(name, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
             Span::styled("?  ", Style::default().fg(Color::Rgb(220, 50, 50))),
-            Span::styled("[y]", Style::default().fg(Color::Rgb(80, 200, 120)).add_modifier(Modifier::BOLD)),
+            Span::styled("[y]", Style::default().fg(Color::Rgb(81, 220, 119)).add_modifier(Modifier::BOLD)),
             Span::styled("es  ", Style::default().fg(Color::DarkGray)),
             Span::styled("[n]", Style::default().fg(Color::Rgb(220, 50, 50)).add_modifier(Modifier::BOLD)),
             Span::styled("o", Style::default().fg(Color::DarkGray)),
         ])
     } else if app.select_mode {
         Some(vec![
-            Span::styled("-- VISUAL --", Style::default().fg(Color::Rgb(80, 200, 120)).add_modifier(Modifier::BOLD)),
+            Span::styled("-- VISUAL --", Style::default().fg(Color::Rgb(81, 220, 119)).add_modifier(Modifier::BOLD)),
         ])
     } else if let Some((ref msg, ref at)) = app.status_flash {
         let duration_ms = if msg.starts_with("path: ") { CLIPBOARD_FLASH_MS as u128 } else { 3000 };
         if at.elapsed().as_millis() < duration_ms {
             let spans = if let Some(rest) = msg.strip_prefix("path: ") {
                 vec![
-                    Span::styled("path: ", Style::default().fg(Color::Rgb(80, 200, 120))),
+                    Span::styled("path: ", Style::default().fg(Color::Rgb(81, 220, 119))),
                     Span::styled(rest.to_string(), Style::default().fg(Color::DarkGray)),
                 ]
             } else {

@@ -472,6 +472,11 @@ fn open_in_default_app(path: &Path) {
     let _ = std::process::Command::new("open").arg(path).status();
 }
 
+fn shell_escape(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+
 fn open_in_nvim(path: &Path) -> io::Result<()> {
     disable_raw_mode()?;
     execute!(open_tty()?, LeaveAlternateScreen, DisableMouseCapture)?;
@@ -723,10 +728,10 @@ fn main() -> io::Result<()> {
 
         let flash_active = app.clipboard.as_ref()
             .is_some_and(|cb| cb.set_at.elapsed().as_millis() < CLIPBOARD_FLASH_MS as u128 + 50);
-        let bg_active = app.bg_done_rx.is_some() || app.ytdlp_error_rx.is_some() || app.ytdlp_formats_rx.is_some();
+        let bg_active = app.bg_done_rx.is_some() || app.ytdlp_error_rx.is_some() || app.ytdlp_formats_rx.is_some() || app.shell_running.load(Ordering::Relaxed) > 0;
         let preview_pending = app.preview_size.as_ref()
             .map_or(false, |s| s.load(Ordering::Relaxed) == u64::MAX);
-        if preview_pending && !bg_active {
+        if preview_pending || bg_active {
             app.spinner_frame = app.spinner_frame.wrapping_add(1);
             needs_redraw = true;
         }
@@ -1199,6 +1204,49 @@ fn main() -> io::Result<()> {
                     continue;
                 }
 
+                // Shell command mode intercepts all keys
+                if app.shell_input.is_some() {
+                    match key.code {
+                        KeyCode::Esc => {
+                            app.shell_input = None;
+                            app.shell_cwd = None;
+                        }
+                        KeyCode::Backspace => {
+                            if let Some(ref mut cmd) = app.shell_input { cmd.pop(); }
+                        }
+                        KeyCode::Enter => {
+                            if let (Some(cmd), cwd) = (app.shell_input.take(), app.shell_cwd.take()) {
+                                let cwd = cwd.unwrap_or_else(|| app.columns[app.active_col].path.clone());
+                                let full = format!("cd {} && {}", shell_escape(&cwd.to_string_lossy()), cmd);
+                                let log = app.shell_output_log.clone();
+                                let running = app.shell_running.clone();
+                                let cmd_label = cmd.trim().to_string();
+                                running.fetch_add(1, Ordering::Relaxed);
+                                std::thread::spawn(move || {
+                                    if let Ok(out) = std::process::Command::new("sh")
+                                        .arg("-c").arg(&full)
+                                        .output()
+                                    {
+                                        let mut entry = format!("$ {}\n", cmd_label);
+                                        let stdout = String::from_utf8_lossy(&out.stdout);
+                                        let stderr = String::from_utf8_lossy(&out.stderr);
+                                        if !stdout.is_empty() { entry.push_str(&stdout); }
+                                        if !stderr.is_empty() { entry.push_str(&stderr); }
+                                        if let Ok(mut g) = log.lock() { g.push(entry); }
+                                    }
+                                    running.fetch_sub(1, Ordering::Relaxed);
+                                });
+                            }
+                        }
+                        KeyCode::Char(c) => {
+                            if let Some(ref mut cmd) = app.shell_input { cmd.push(c); }
+                        }
+                        _ => {}
+                    }
+                    needs_redraw = true;
+                    continue;
+                }
+
                 // Goto mode intercepts all keys
                 if app.goto_query.is_some() {
                     match key.code {
@@ -1577,6 +1625,26 @@ fn main() -> io::Result<()> {
                         app.pending_prefix = None;
                         app.ytdlp = Some(YtdlpState::UrlInput(String::new()));
                     }
+                    KeyCode::Char('X') => {
+                        app.pending_g = false;
+                        app.pending_prefix = None;
+                        let col = &app.columns[app.active_col];
+                        if let Some(e) = col.grouped.entry_at_row(col.selected_row) {
+                            if !e.is_dir {
+                                let name = e.path.file_name()
+                                    .and_then(|n| n.to_str())
+                                    .unwrap_or("");
+                                app.shell_cwd = e.path.parent().map(|p| p.to_path_buf());
+                                app.shell_input = Some(format!("./{} ", name));
+                            }
+                        }
+                    }
+                    KeyCode::Char(':') => {
+                        app.pending_g = false;
+                        app.pending_prefix = None;
+                        app.shell_cwd = Some(app.columns[app.active_col].path.clone());
+                        app.shell_input = Some(String::new());
+                    }
                     KeyCode::Char('U') => {
                         app.pending_g = false;
                         app.pending_prefix = None;
@@ -1828,6 +1896,11 @@ fn main() -> io::Result<()> {
     terminal.show_cursor()?;
     if let Some(path) = app.cd_target {
         println!("{}", path.display());
+    }
+    if let Ok(log) = app.shell_output_log.lock() {
+        for entry in log.iter() {
+            eprint!("{}", entry);
+        }
     }
     Ok(())
 }
