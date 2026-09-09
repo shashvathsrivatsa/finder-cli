@@ -41,11 +41,6 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     let full_area = frame.area();
 
     // Build left status spans first so we can measure their width
-    let link_prefix: Vec<Span> = if app.linked_pane.is_some() {
-        vec![Span::styled(" \u{F0C1} ", Style::default().fg(Color::Rgb(100, 180, 255)))]
-    } else {
-        vec![]
-    };
 
     const SPINNER: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
     let spinner_ch = SPINNER[app.spinner_frame % SPINNER.len()];
@@ -158,7 +153,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     // Status takes priority — when active, hide preview entirely.
     // Name mode expands the bar height; short/long stay at 1 line.
-    let showing_status = !link_prefix.is_empty() || status_spans.is_some() || app.converting.is_some() || app.ytdlp.is_some();
+    let showing_status = status_spans.is_some() || app.converting.is_some() || app.ytdlp.is_some();
 
     let status_height: u16 = if app.ytdlp.is_some() {
         match &app.ytdlp {
@@ -217,8 +212,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         let lines = convert_bar_lines(cs, status_area.width as usize);
         frame.render_widget(Paragraph::new(lines), status_area);
     } else if showing_status {
-        let mut spans = link_prefix;
-        if let Some(s) = status_spans { spans.extend(s); }
+        let spans = status_spans.unwrap_or_default();
         frame.render_widget(Paragraph::new(Line::from(spans)), status_area);
     } else {
         // No active status — show preview
@@ -326,6 +320,18 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         if let Some(spans) = preview_spans {
             frame.render_widget(Paragraph::new(Line::from(spans)), status_area);
         }
+    }
+
+    // Link icon — right-aligned, always on top
+    if app.linked_pane.is_some() {
+        let icon = " \u{F0C1} ";
+        let icon_len = icon.chars().count() as u16;
+        let x = status_area.x + status_area.width.saturating_sub(icon_len);
+        let icon_area = Rect { x, y: status_area.y, width: icon_len, height: 1 };
+        frame.render_widget(
+            Paragraph::new(Span::styled(icon, Style::default().fg(Color::Rgb(100, 180, 255)))),
+            icon_area,
+        );
     }
 
     let num_cols = app.columns.len();
