@@ -71,6 +71,7 @@ const POWERPOINT:&str = "\u{F1C4}";
 const NETWORK:   &str = "\u{F0AC}";
 const JAC:       &str = "\u{2B22}";
 const SHADER:    &str = "\u{F1B2}";
+const R_LANG:    &str = "\u{F25D}";
 
 pub fn icon_for_name(name: &str) -> (&'static str, Color) {
     match name.to_lowercase().as_str() {
@@ -97,6 +98,7 @@ pub fn icon_for_name(name: &str) -> (&'static str, Color) {
         "html" | "htm"                    => (HTML,      Color::Rgb(228,  79,  38)),
         "css"                             => (CSS,       Color::Rgb( 38, 143, 222)),
         "scss" | "sass"                   => (SCSS,      Color::Rgb(204, 102, 153)),
+        "r" | "rmd" | "rdata" | "rds"     => (R_LANG,    Color::Rgb( 39, 109, 195)),
         "py" | "pyi"                       => (PYTHON,    Color::Rgb( 55, 118, 171)),
         "jac"                              => (JAC,       Color::Rgb(234,  90,  40)),
         "wgsl" | "glsl" | "hlsl" | "frag"
@@ -173,6 +175,7 @@ pub fn group_label(ext: &str) -> &'static str {
         | "wgsl" | "glsl" | "hlsl" | "frag" | "vert" | "comp"    => "Developer",
         "toml" | "yaml" | "yml" | "json" | "ini" | "cfg" | "conf" | "env"
         | "tf" | "tfvars" | "tfstate" | "gitignore" | "lock"      => "Config",
+        "r" | "rmd" | "rdata" | "rds"                             => "R",
         "sh" | "bash" | "zsh" | "fish" | "vim" | "nix"            => "Scripts",
         "md" | "mdx" | "txt" | "csv" | "pdf" | "doc" | "docx"
         | "xls" | "xlsx" | "ppt" | "pptx"                         => "Documents",
