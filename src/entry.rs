@@ -136,7 +136,7 @@ pub fn icon_for_name(name: &str) -> (&'static str, Color) {
         "mp4" | "mov" | "avi" | "mkv"
         | "webm"                          => (VIDEO,     Color::Rgb(253, 199,   0)),
         "mp3" | "wav" | "flac" | "aac"
-        | "ogg"                           => (AUDIO,     Color::Rgb(  0, 188, 212)),
+        | "ogg" | "m4a"                   => (AUDIO,     Color::Rgb(  0, 188, 212)),
         "pdf"                             => (PDF,       Color::Rgb(236,  56,  50)),
         "zip" | "tar" | "gz" | "tgz" | "bz2" | "tbz" | "tbz2"
         | "xz" | "txz" | "7z" | "rar" | "zst" | "zstd"
@@ -189,7 +189,7 @@ pub fn group_label(ext: &str) -> &'static str {
         "png" | "jpg" | "jpeg" | "gif" | "svg" | "ico"
         | "webp" | "bmp" | "tiff" | "heic" | "heif" | "avif"      => "Images",
         "mp4" | "mov" | "avi" | "mkv" | "webm"                    => "Video",
-        "mp3" | "wav" | "flac" | "aac" | "ogg"                    => "Audio",
+        "mp3" | "wav" | "flac" | "aac" | "ogg" | "m4a"             => "Audio",
         "ttf" | "otf" | "woff" | "woff2"                          => "Fonts",
         "pem" | "key" | "crt" | "cert" | "p12" | "pfx"
         | "ca-bundle"                                              => "Security",
