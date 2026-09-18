@@ -217,7 +217,7 @@ pub fn read_dir_entries(path: &Path) -> Vec<Entry> {
             let is_dir = p.is_dir();
             let is_executable = !is_dir
                 && p.metadata()
-                    .map(|m| m.permissions().mode() & 0o111 != 0)
+                    .map(|m| m.file_type().is_file() && m.permissions().mode() & 0o111 != 0)
                     .unwrap_or(false);
             Some(Entry { name, path: p, is_dir, is_executable })
         })
