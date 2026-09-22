@@ -104,6 +104,16 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             Span::styled(format!("{} ", spinner_ch), Style::default().fg(Color::Rgb(100, 180, 255))),
             Span::styled(label, Style::default().fg(Color::Rgb(100, 180, 255)).add_modifier(Modifier::BOLD)),
         ])
+    } else if let Some(ref s) = app.watcher_input {
+        let valid = {
+            if let Some((uh, p)) = s.split_once(':') { uh.contains('@') && !p.is_empty() } else { false }
+        };
+        let _ = valid;
+        Some(vec![
+            Span::styled("push to remote: ", Style::default().fg(Color::Rgb(81, 220, 119)).add_modifier(Modifier::BOLD)),
+            Span::styled(s.clone(), Style::default().fg(Color::White)),
+            Span::styled("█", Style::default().fg(Color::Rgb(81, 220, 119))),
+        ])
     } else if let Some(ref cmd) = app.shell_input {
         Some(vec![
             Span::styled(":! ", Style::default().fg(Color::Rgb(180, 180, 180)).add_modifier(Modifier::BOLD)),
@@ -139,11 +149,16 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             Span::styled("-- VISUAL --", Style::default().fg(Color::Rgb(81, 220, 119)).add_modifier(Modifier::BOLD)),
         ])
     } else if let Some((ref msg, ref at)) = app.status_flash {
-        let duration_ms = if msg.starts_with("path: ") { CLIPBOARD_FLASH_MS as u128 } else { 3000 };
+        let duration_ms = if msg.starts_with("path: ") || msg.starts_with("push: ") { CLIPBOARD_FLASH_MS as u128 } else { 3000 };
         if at.elapsed().as_millis() < duration_ms {
             let spans = if let Some(rest) = msg.strip_prefix("path: ") {
                 vec![
                     Span::styled("path: ", Style::default().fg(Color::Rgb(81, 220, 119))),
+                    Span::styled(rest.to_string(), Style::default().fg(Color::DarkGray)),
+                ]
+            } else if let Some(rest) = msg.strip_prefix("push: ") {
+                vec![
+                    Span::styled("push: ", Style::default().fg(Color::Rgb(81, 220, 119)).add_modifier(Modifier::BOLD)),
                     Span::styled(rest.to_string(), Style::default().fg(Color::DarkGray)),
                 ]
             } else {
@@ -170,7 +185,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     // Status takes priority — when active, hide preview entirely.
     // Name mode expands the bar height; short/long stay at 1 line.
-    let showing_status = status_spans.is_some() || app.converting.is_some() || app.ytdlp.is_some();
+    let showing_status = status_spans.is_some() || app.converting.is_some() || app.ytdlp.is_some() || app.watcher_input.is_some();
 
     let status_height: u16 = if app.ytdlp.is_some() {
         match &app.ytdlp {
@@ -418,7 +433,13 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         let selected_path = col.selected_entry().map(|e| e.path.clone());
         // Only pass rename input for the active column
         let renaming = if is_active { app.renaming.as_ref() } else { None };
-        let (items, _) = col.grouped.list_items(selected_path.as_deref(), renaming, &app.selection, &app.favorites);
+        let watched: std::collections::HashSet<std::path::PathBuf> = if let Some((ref daemons, _)) = app.watcher_picker {
+            daemons.iter().map(|d| d.local.clone()).collect()
+        } else {
+            // load from file lazily — only pay cost once per render
+            crate::app::WatcherDaemon::watched_paths()
+        };
+        let (items, _) = col.grouped.list_items(selected_path.as_deref(), renaming, &app.selection, &app.favorites, &watched);
 
         let highlight_style = if is_active && app.renaming.is_some() {
             Style::default()
@@ -527,7 +548,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
         let visual_sel = pane_to_item.get(sel).copied().unwrap_or(0);
         let height = (items.len() as u16 + 2).min(full_area.height.saturating_sub(2));
-        let width = 50u16.min(full_area.width.saturating_sub(4));
+        let width = full_area.width.saturating_sub(8);
         let x = (full_area.width.saturating_sub(width)) / 2;
         let y = (full_area.height.saturating_sub(height)) / 2;
         let popup_area = Rect { x, y, width, height };
@@ -541,6 +562,45 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
         let mut list_state = ratatui::widgets::ListState::default();
         list_state.select(Some(visual_sel));
+
+        frame.render_widget(Clear, popup_area);
+        frame.render_stateful_widget(list, popup_area, &mut list_state);
+    }
+
+    if let Some((ref daemons, sel)) = app.watcher_picker {
+        let items: Vec<ListItem> = if daemons.is_empty() {
+            vec![ListItem::new(Line::from(vec![
+                Span::styled("  No active watchers", Style::default().fg(Color::DarkGray)),
+            ]))]
+        } else {
+            daemons.iter().map(|d| {
+                let local = d.local.file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| d.local.display().to_string());
+                ListItem::new(Line::from(vec![
+                    Span::styled("   \u{F0E8}  ", Style::default().fg(Color::Rgb(81, 220, 119))),
+                    Span::raw(local),
+                    Span::raw("  →  "),
+                    Span::raw(d.remote.clone()),
+                ]))
+            }).collect()
+        };
+
+        let height = (items.len() as u16 + 2).min(full_area.height.saturating_sub(2));
+        let width = full_area.width.saturating_sub(8);
+        let x = (full_area.width.saturating_sub(width)) / 2;
+        let y = (full_area.height.saturating_sub(height)) / 2;
+        let popup_area = Rect { x, y, width, height };
+
+        let mut list_state = ratatui::widgets::ListState::default();
+        list_state.select(if daemons.is_empty() { None } else { Some(sel) });
+
+        let list = List::new(items)
+            .block(Block::bordered()
+                .title(Span::styled(" Watchers  [x] kill ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)))
+                .border_style(Style::default().fg(Color::Rgb(81, 220, 119)))
+                .style(Style::default().bg(Color::Black)))
+            .highlight_style(Style::default().bg(Color::Rgb(20, 80, 40)).add_modifier(Modifier::BOLD));
 
         frame.render_widget(Clear, popup_area);
         frame.render_stateful_widget(list, popup_area, &mut list_state);

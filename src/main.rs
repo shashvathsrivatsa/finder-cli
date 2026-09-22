@@ -17,7 +17,7 @@ use crossterm::{
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
 
-use app::{App, ClipboardEntry, ClipboardOp, ConvertState, DynYtFormat, PaneInfo, CLIPBOARD_FLASH_MS, PAGE_JUMP, YtdlpState, convert_formats_for, save_favorites, unique_output_path};
+use app::{App, ClipboardEntry, ClipboardOp, ConvertState, DynYtFormat, PaneInfo, WatcherDaemon, CLIPBOARD_FLASH_MS, PAGE_JUMP, YtdlpState, convert_formats_for, save_favorites, unique_output_path};
 use rename::{RenameMode, RenameState};
 use ui::render;
 
@@ -494,7 +494,110 @@ fn open_in_nvim(path: &Path) -> io::Result<()> {
     Ok(())
 }
 
+fn daemons_path() -> PathBuf {
+    let base = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+    let dir = PathBuf::from(base).join(".local/share/dir-viewer");
+    let _ = std::fs::create_dir_all(&dir);
+    dir.join("fs_daemons.txt")
+}
+
+fn load_daemons() -> Vec<WatcherDaemon> {
+    std::fs::read_to_string(daemons_path()).unwrap_or_default()
+        .lines()
+        .filter_map(|line| {
+            let mut parts = line.splitn(3, '\t');
+            let pid: u32 = parts.next()?.parse().ok()?;
+            let local = PathBuf::from(parts.next()?);
+            let remote = parts.next()?.to_string();
+            Some(WatcherDaemon { pid, local, remote })
+        })
+        .filter(|d| is_pid_running(d.pid))
+        .collect()
+}
+
+fn save_daemons(daemons: &[WatcherDaemon]) {
+    let content: String = daemons.iter()
+        .map(|d| format!("{}\t{}\t{}\n", d.pid, d.local.display(), d.remote))
+        .collect();
+    let _ = std::fs::write(daemons_path(), content);
+}
+
+fn is_pid_running(pid: u32) -> bool {
+    // kill -0 checks existence without sending a signal
+    std::process::Command::new("kill")
+        .arg("-0")
+        .arg(pid.to_string())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+fn is_valid_remote(s: &str) -> bool {
+    if let Some((userhost, path)) = s.split_once(':') {
+        userhost.contains('@') && !path.is_empty()
+    } else {
+        false
+    }
+}
+
+fn spawn_watcher_daemon(local: &Path, remote: &str) -> io::Result<u32> {
+    let exe = std::env::current_exe()?;
+    let child = std::process::Command::new(exe)
+        .arg("--watcher")
+        .arg(local)
+        .arg(remote)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()?;
+    Ok(child.id())
+}
+
+fn run_watcher_daemon(local: PathBuf, remote: String) {
+    use notify::{Watcher, RecursiveMode, recommended_watcher, Result as NResult, Event};
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    let (tx, rx) = mpsc::channel::<NResult<Event>>();
+    let mut watcher = match recommended_watcher(tx) {
+        Ok(w) => w,
+        Err(_) => return,
+    };
+    if watcher.watch(&local, RecursiveMode::Recursive).is_err() { return; }
+
+    // debounce: wait 500ms after last event before syncing
+    loop {
+        if rx.recv().is_err() { break; }
+        // drain any queued events
+        while rx.recv_timeout(Duration::from_millis(500)).is_ok() {}
+        let src = if local.is_dir() {
+            format!("{}/", local.display())
+        } else {
+            local.display().to_string()
+        };
+        std::process::Command::new("rsync")
+            .arg("-avz")
+            .arg("--delete")
+            .arg(&src)
+            .arg(&remote)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status().ok();
+    }
+}
+
 fn main() -> io::Result<()> {
+    // Daemon mode — launched by spawn_watcher_daemon()
+    let args: Vec<String> = std::env::args().collect();
+    if args.get(1).map(|s| s.as_str()) == Some("--watcher") {
+        if let (Some(local), Some(remote)) = (args.get(2), args.get(3)) {
+            run_watcher_daemon(PathBuf::from(local), remote.clone());
+        }
+        return Ok(());
+    }
+
     let start = std::env::args()
         .nth(1)
         .map(PathBuf::from)
@@ -1204,6 +1307,67 @@ fn main() -> io::Result<()> {
                     continue;
                 }
 
+                // Watcher input intercepts all keys
+                if app.watcher_input.is_some() {
+                    match key.code {
+                        KeyCode::Esc => { app.watcher_input = None; }
+                        KeyCode::Backspace => { if let Some(ref mut s) = app.watcher_input { s.pop(); } }
+                        KeyCode::Char(c) => { if let Some(ref mut s) = app.watcher_input { s.push(c); } }
+                        KeyCode::Enter => {
+                            if let Some(remote) = app.watcher_input.take() {
+                                if is_valid_remote(&remote) {
+                                    let col = &app.columns[app.active_col];
+                                    let local = col.grouped.entry_at_row(col.selected_row)
+                                        .map(|e| e.path.clone())
+                                        .unwrap_or_else(|| col.path.clone());
+                                    match spawn_watcher_daemon(&local, &remote) {
+                                        Ok(pid) => {
+                                            let mut daemons = load_daemons();
+                                            daemons.push(WatcherDaemon { pid, local, remote });
+                                            save_daemons(&daemons);
+                                            app.status_flash = Some(("push: started".into(), std::time::Instant::now()));
+                                        }
+                                        Err(e) => {
+                                            app.status_flash = Some((format!("Error: {}", e), std::time::Instant::now()));
+                                        }
+                                    }
+                                } else {
+                                    app.status_flash = Some(("Invalid remote path (use user@host:/path)".into(), std::time::Instant::now()));
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                    needs_redraw = true;
+                    continue;
+                }
+
+                // Watcher picker intercepts all keys
+                if let Some((ref daemons, ref mut sel)) = app.watcher_picker {
+                    let n = daemons.len();
+                    match key.code {
+                        KeyCode::Esc | KeyCode::Char('q') => { app.watcher_picker = None; }
+                        KeyCode::Up   | KeyCode::Char('k') => { if *sel > 0 { *sel -= 1; } }
+                        KeyCode::Down | KeyCode::Char('j') => { if *sel + 1 < n { *sel += 1; } }
+                        KeyCode::Char('x') => {
+                            let daemons_snap = daemons.clone();
+                            let idx = *sel;
+                            app.watcher_picker = None;
+                            if let Some(d) = daemons_snap.get(idx) {
+                                std::process::Command::new("kill")
+                                    .arg(d.pid.to_string())
+                                    .status().ok();
+                                let mut remaining = load_daemons();
+                                remaining.retain(|r| r.pid != d.pid);
+                                save_daemons(&remaining);
+                            }
+                        }
+                        _ => {}
+                    }
+                    needs_redraw = true;
+                    continue;
+                }
+
                 // Shell command mode intercepts all keys
                 if app.shell_input.is_some() {
                     match key.code {
@@ -1624,6 +1788,18 @@ fn main() -> io::Result<()> {
                         app.pending_g = false;
                         app.pending_prefix = None;
                         app.ytdlp = Some(YtdlpState::UrlInput(String::new()));
+                    }
+                    KeyCode::Char('w') if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        app.pending_g = false;
+                        app.pending_prefix = None;
+                        app.watcher_input = Some(String::new());
+                    }
+                    KeyCode::Char('W') => {
+                        app.pending_g = false;
+                        app.pending_prefix = None;
+                        let daemons = load_daemons();
+                        save_daemons(&daemons); // prune dead pids
+                        app.watcher_picker = Some((daemons, 0));
                     }
                     KeyCode::Char('X') => {
                         app.pending_g = false;

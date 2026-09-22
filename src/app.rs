@@ -120,6 +120,30 @@ pub struct App {
     pub shell_cwd: Option<PathBuf>,
     pub shell_output_log: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
     pub shell_running: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    pub watcher_input: Option<String>,
+    pub watcher_picker: Option<(Vec<WatcherDaemon>, usize)>,
+}
+
+#[derive(Clone)]
+pub struct WatcherDaemon {
+    pub pid: u32,
+    pub local: PathBuf,
+    pub remote: String,
+}
+
+impl WatcherDaemon {
+    pub fn watched_paths() -> std::collections::HashSet<PathBuf> {
+        let base = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+        let path = Path::new(&base).join(".local/share/dir-viewer/fs_daemons.txt");
+        std::fs::read_to_string(&path).unwrap_or_default()
+            .lines()
+            .filter_map(|line| {
+                let mut parts = line.splitn(3, '\t');
+                let _pid = parts.next()?;
+                Some(PathBuf::from(parts.next()?))
+            })
+            .collect()
+    }
 }
 
 impl App {
@@ -179,6 +203,8 @@ impl App {
             shell_cwd: None,
             shell_output_log: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             shell_running: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            watcher_input: None,
+            watcher_picker: None,
         };
         app.maybe_push_child_column();
         app
