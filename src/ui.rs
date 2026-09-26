@@ -371,7 +371,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     const COL_WIDTH: u16 = 32;
     let fits = area.width / COL_WIDTH;
     let visible_cols = (fits as usize).max(1).min(num_cols);
-    let single_pane = fits < 2; // not enough room for even two columns
+    let single_pane = fits < 2 || app.focus_view;
     let preferred_start = app.active_col.saturating_sub(visible_cols.saturating_sub(2));
     let start_col = preferred_start.min(num_cols.saturating_sub(visible_cols));
 

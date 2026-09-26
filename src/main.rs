@@ -1893,6 +1893,9 @@ fn main() -> io::Result<()> {
                             }
                         }
                     }
+                    KeyCode::Char('v') => {
+                        app.focus_view = !app.focus_view;
+                    }
                     KeyCode::Char('x') => {
                         use app::PreviewMode;
                         app.preview_mode = match app.preview_mode {

@@ -122,6 +122,7 @@ pub struct App {
     pub shell_running: std::sync::Arc<std::sync::atomic::AtomicUsize>,
     pub watcher_input: Option<String>,
     pub watcher_picker: Option<(Vec<WatcherDaemon>, usize)>,
+    pub focus_view: bool,
 }
 
 #[derive(Clone)]
@@ -205,6 +206,7 @@ impl App {
             shell_running: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             watcher_input: None,
             watcher_picker: None,
+            focus_view: false,
         };
         app.maybe_push_child_column();
         app
