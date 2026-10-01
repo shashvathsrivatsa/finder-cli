@@ -421,7 +421,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                     Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
                 ))
                 .border_style(Style::default().fg(Color::Rgb(60, 60, 60)))
-                .style(Style::default().bg(Color::Black));
+                .style(Style::default().bg(Color::Reset));
             let inner = block.inner(col_chunks[vi]);
             frame.render_widget(block, col_chunks[vi]);
             inner
@@ -453,7 +453,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
         let list = List::new(items)
             .highlight_style(highlight_style)
-            .style(Style::default().fg(Color::Rgb(200, 200, 200)));
+            .style(Style::default().fg(Color::Rgb(200, 200, 200)).bg(Color::Reset));
 
         frame.render_stateful_widget(list, inner, &mut col.list_state);
     }
