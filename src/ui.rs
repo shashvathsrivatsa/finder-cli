@@ -453,7 +453,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
         let list = List::new(items)
             .highlight_style(highlight_style)
-            .style(Style::default().fg(Color::Rgb(200, 200, 200)).bg(Color::Reset));
+            .style(Style::default().fg(Color::Reset).bg(Color::Reset));
 
         frame.render_stateful_widget(list, inner, &mut col.list_state);
     }
