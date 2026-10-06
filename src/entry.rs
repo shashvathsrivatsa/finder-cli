@@ -72,6 +72,7 @@ const NETWORK:   &str = "\u{F0AC}";
 const JAC:       &str = "\u{2B22}";
 const SHADER:    &str = "\u{F1B2}";
 const R_LANG:    &str = "\u{F25D}";
+const BOOK:      &str = "\u{F02D}";
 
 pub fn icon_for_name(name: &str) -> (&'static str, Color) {
     match name.to_lowercase().as_str() {
@@ -138,6 +139,7 @@ pub fn icon_for_name(name: &str) -> (&'static str, Color) {
         "mp3" | "wav" | "flac" | "aac"
         | "ogg" | "m4a"                   => (AUDIO,     Color::Rgb(  0, 188, 212)),
         "pdf"                             => (PDF,       Color::Rgb(236,  56,  50)),
+        "epub"                            => (BOOK,      Color::Rgb(255, 221,  87)),
         "zip" | "tar" | "gz" | "tgz" | "bz2" | "tbz" | "tbz2"
         | "xz" | "txz" | "7z" | "rar" | "zst" | "zstd"
         | "lz" | "lzma" | "lz4" | "cab" | "iso" | "dmg"
@@ -190,6 +192,7 @@ pub fn group_label(ext: &str) -> &'static str {
         | "webp" | "bmp" | "tiff" | "heic" | "heif" | "avif"      => "Images",
         "mp4" | "mov" | "avi" | "mkv" | "webm"                    => "Video",
         "mp3" | "wav" | "flac" | "aac" | "ogg" | "m4a"             => "Audio",
+        "epub"                                                     => "Books",
         "ttf" | "otf" | "woff" | "woff2"                          => "Fonts",
         "pem" | "key" | "crt" | "cert" | "p12" | "pfx"
         | "ca-bundle"                                              => "Security",

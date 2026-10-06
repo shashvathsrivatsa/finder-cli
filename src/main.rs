@@ -1287,10 +1287,12 @@ fn main() -> io::Result<()> {
                                     } else if is_image {
                                         let has_magick = std::process::Command::new("magick")
                                             .arg("--version").output().is_ok();
-                                        if has_magick {
-                                            std::process::Command::new("magick")
-                                                .arg(&source).arg(&output).output().ok();
-                                        } else {
+                                        let magick_ok = has_magick && std::process::Command::new("magick")
+                                            .arg(&source).arg(&output).output()
+                                            .map(|o| o.status.success()).unwrap_or(false);
+                                        // Fall back to ffmpeg, which tolerates some malformed files magick rejects
+                                        if !magick_ok {
+                                            std::fs::remove_file(&output).ok();
                                             std::process::Command::new("ffmpeg")
                                                 .args(["-y", "-i"]).arg(&source).arg(&output).output().ok();
                                         }

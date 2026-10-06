@@ -38,6 +38,7 @@ impl GroupedEntries {
         let mut video_indices:    Vec<usize> = Vec::new();
         let mut audio_indices:    Vec<usize> = Vec::new();
         let mut doc_indices:      Vec<usize> = Vec::new();
+        let mut book_indices:     Vec<usize> = Vec::new();
         let mut font_indices:     Vec<usize> = Vec::new();
         let mut security_indices: Vec<usize> = Vec::new();
         let mut network_indices:    Vec<usize> = Vec::new();
@@ -58,6 +59,7 @@ impl GroupedEntries {
                     "Video"     => video_indices.push(i),
                     "Audio"     => audio_indices.push(i),
                     "Documents" => doc_indices.push(i),
+                    "Books"     => book_indices.push(i),
                     "Fonts"     => font_indices.push(i),
                     "Security"  => security_indices.push(i),
                     "Network"     => network_indices.push(i),
@@ -80,6 +82,7 @@ impl GroupedEntries {
             ("Video",       video_indices),
             ("Audio",       audio_indices),
             ("Documents",   doc_indices),
+            ("Books",       book_indices),
             ("Fonts",       font_indices),
             ("Security",    security_indices),
             ("Network",     network_indices),
