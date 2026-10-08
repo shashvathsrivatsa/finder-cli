@@ -1237,7 +1237,7 @@ fn main() -> io::Result<()> {
                                     "doc"|"docx"|"odt"|"rtf"|"txt"|"md"|"mdx"
                                     |"xls"|"xlsx"|"ods"|"csv"|"ppt"|"pptx"|"odp");
                                 let is_image = matches!(ext.as_str(),
-                                    "jpg"|"jpeg"|"png"|"webp"|"tiff"|"tif"|"heic"|"heif"|"bmp"|"gif");
+                                    "jpg"|"jpeg"|"png"|"webp"|"tiff"|"tif"|"heic"|"heif"|"bmp"|"avif"|"gif");
                                 let required_tool = if is_doc { "soffice" }
                                     else if is_image { "magick" }
                                     else { "ffmpeg" };
@@ -1262,7 +1262,7 @@ fn main() -> io::Result<()> {
                                     let ext = source.extension()
                                         .and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
                                     let is_image = matches!(ext.as_str(),
-                                        "jpg"|"jpeg"|"png"|"webp"|"tiff"|"tif"|"heic"|"heif"|"bmp"|"gif");
+                                        "jpg"|"jpeg"|"png"|"webp"|"tiff"|"tif"|"heic"|"heif"|"bmp"|"avif"|"gif");
                                     let is_doc = matches!(ext.as_str(),
                                         "doc"|"docx"|"odt"|"rtf"|"txt"|"md"|"mdx"
                                         |"xls"|"xlsx"|"ods"|"csv"|"ppt"|"pptx"|"odp");

@@ -301,6 +301,7 @@ pub fn convert_formats_for(path: &Path) -> Vec<&'static str> {
         "tiff" | "tif" => vec!["jpg", "png", "webp", "pdf"],
         "heic" | "heif"=> vec!["jpg", "png", "webp", "tiff", "pdf"],
         "bmp"          => vec!["png", "jpg", "webp", "tiff", "pdf"],
+        "avif"         => vec!["png", "jpg", "webp", "tiff", "pdf"],
         "gif"          => vec!["mp4", "webm", "png"],
         "mp4"          => vec!["mov", "webm", "gif", "mp3"],
         "mov"          => vec!["mp4", "webm", "gif", "mp3"],
