@@ -73,6 +73,7 @@ const JAC:       &str = "\u{2B22}";
 const SHADER:    &str = "\u{F1B2}";
 const R_LANG:    &str = "\u{F25D}";
 const BOOK:      &str = "\u{F02D}";
+const LOG:       &str = "\u{F022}";
 
 pub fn icon_for_name(name: &str) -> (&'static str, Color) {
     match name.to_lowercase().as_str() {
@@ -127,6 +128,7 @@ pub fn icon_for_name(name: &str) -> (&'static str, Color) {
         "doc" | "docx" | "odt" | "rtf"   => (WORD,       Color::Rgb( 43, 116, 184)),
         "xls" | "xlsx" | "ods"           => (EXCEL,      Color::Rgb( 33, 115,  70)),
         "ppt" | "pptx" | "odp"           => (POWERPOINT, Color::Rgb(200,  80,  50)),
+        "log"                             => (LOG,       Color::Rgb(140, 160, 190)),
         "txt"                             => (TEXT,      Color::Rgb(187, 187, 187)),
         "ttf" | "otf" | "woff" | "woff2" => (FONT,      Color::Rgb(200, 160, 255)),
         "pem" | "key" | "crt" | "cert"
@@ -193,6 +195,7 @@ pub fn group_label(ext: &str) -> &'static str {
         "mp4" | "mov" | "avi" | "mkv" | "webm"                    => "Video",
         "mp3" | "wav" | "flac" | "aac" | "ogg" | "m4a"             => "Audio",
         "epub"                                                     => "Books",
+        "log"                                                      => "Logs",
         "ttf" | "otf" | "woff" | "woff2"                          => "Fonts",
         "pem" | "key" | "crt" | "cert" | "p12" | "pfx"
         | "ca-bundle"                                              => "Security",
