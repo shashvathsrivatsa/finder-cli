@@ -1103,7 +1103,12 @@ fn main() -> io::Result<()> {
                 if app.ytdlp.is_some() {
                     match key.code {
                         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => break,
-                        KeyCode::Esc | KeyCode::Char('q') => {
+                        KeyCode::Esc => {
+                            app.ytdlp = None;
+                            app.ytdlp_formats_rx = None;
+                        }
+                        // 'q' only cancels outside the URL text field, so it can be typed
+                        KeyCode::Char('q') if !matches!(app.ytdlp, Some(YtdlpState::UrlInput(_))) => {
                             app.ytdlp = None;
                             app.ytdlp_formats_rx = None;
                         }
