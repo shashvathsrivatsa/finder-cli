@@ -79,7 +79,21 @@ pub fn icon_for_name(name: &str) -> (&'static str, Color) {
     match name.to_lowercase().as_str() {
         "cargo.toml"                                       => return (RUST,   Color::Rgb(222, 165, 132)),
         "cargo.lock"                                       => return (LOCK,   Color::Rgb(183, 183, 183)),
-        "package.json" | "package-lock.json"               => return (NODE,   Color::Rgb(203, 120,  50)),
+        "package.json" | "package-lock.json"
+        | "npm-shrinkwrap.json"                            => return (NODE,   Color::Rgb(203, 120,  50)),
+        "tsconfig.json" | "tsconfig.base.json"
+        | "jsconfig.json"                                  => return (TS,     Color::Rgb( 49, 120, 198)),
+        ".eslintrc.json" | ".eslintrc"                     => return (JS,     Color::Rgb(100, 110, 230)),
+        "settings.json" | "config.json"
+        | ".prettierrc" | "prettier.json"
+        | ".babelrc" | "babel.config.json"
+        | "jest.config.json" | "vitest.config.json"
+        | ".mocharc.json" | "rollup.config.json"
+        | "webpack.config.json"                            => return (COG,    Color::Rgb(180, 180, 180)),
+        "launch.json" | "tasks.json"
+        | "extensions.json"                                => return (COG,    Color::Rgb( 0, 122, 204)),
+        "deno.json" | "deno.lock"                          => return (COG,    Color::Rgb( 0, 190, 170)),
+        "composer.json" | "composer.lock"                  => return (COG,    Color::Rgb(100, 150, 230)),
         ".gitignore" | ".gitmodules" | ".gitattributes"    => return (GIT,    Color::Rgb(241,  80,  47)),
         "dockerfile" | "docker-compose.yml"
         | "docker-compose.yaml"                            => return (DOCKER, Color::Rgb(  1, 135, 201)),
